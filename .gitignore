@@ -1,0 +1,33 @@
+# Secrets
+.env
+.env.*
+*.pem
+service-account*.json
+google-services.json
+GoogleService-Info.plist
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node / web
+node_modules/
+dist/
+.next/
+
+# Flutter / Dart
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Large data
+data/raw/
+*.geojson.gz
