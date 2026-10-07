@@ -1,6 +1,6 @@
 # SafeHer — Design Spec
 
-**Status:** Draft v0.1 · **Event:** Google AI Builder Cup · **Track:** Sustainability & Social Welfare
+**Status:** Draft v0.2 · **Event:** Google AI Builder Cup · **Track:** Sustainability & Social Welfare
 **Last updated:** 4 Oct 2026
 
 ---
@@ -178,6 +178,23 @@ route_score   = 0.8 × length_weighted_mean(segment_score)
 ### 7.3 Data confidence
 - Each signal also returns a **confidence** (0–1) based on data coverage. Low-coverage signals have their weight redistributed and the UI shows "Limited data in this area" rather than a misleadingly precise score.
 - Score shown as a whole number plus band; detail view shows the confidence of each signal.
+- **Implemented rules** (`backend/safeher/scoring.py`, `signals.py`, weights version `2026-10-04.1`):
+  - Effective weight of a signal = base weight × confidence, renormalised to sum to 1. "No data" (confidence 0) therefore never counts as a low score.
+  - A segment whose confidence-backed weight is < 15% of the total is **unscored**; a route with < 50% of its length scored shows "Limited data" instead of a number.
+  - The worst-stretch term is a **length-weighted** 10th percentile, so short segments can't hide a long dark stretch.
+  - Night/day blend is linear over 30 min **centred** on sunrise and sunset (`astral`); departure times must carry a timezone.
+
+| Signal | Confidence used |
+|---|---|
+| Lighting: OSM `lit=*` tag | 0.9 (`limited`/`interval` = 70; `lit=no` = 0 at night, 50 by day) |
+| Lighting: mapped street lamps within 25 m | 0.7 (60 + 20 per lamp, max 100) |
+| Lighting: no tag or lamps → road-type prior (primary 80 … path 25) | 0.3, labelled "estimated" in UI |
+| Transit | 0.8 (0.6 when no stop is found in the search radius) |
+| Safe spaces | 0.7 |
+| Historical incidents | Set per city; low (≈0.2) while only district-level data exists |
+| Community reports | 0.4 with no reports (absence is weak evidence), rising 0.1 per report to 0.9 |
+
+- Report severity (points subtracted when fresh and verified): harassment 40 · unsafe crowd 25 · isolated stretch 20 · broken light 15 · poor footpath 10 · unsafe washroom 10 · positive −15 (adds). Pending reports count ×0.5; reports > 30 days old or future-dated are ignored. Broken-light reports affect only the reports signal, not lighting, to avoid double counting.
 
 ### 7.4 Fairness rules
 - Incident data is never shown as a standalone "danger map" to users; it only contributes inside route scores.
@@ -198,6 +215,22 @@ route_score   = 0.8 × length_weighted_mean(segment_score)
 | Sunrise/sunset | Computed from lat/lng/date | — | Computed |
 
 > Data availability varies by city. The MVP targets **one pilot city** with the best open-data coverage (decide in §13) and shows coverage/confidence everywhere else.
+
+### 8.1 Hackathon MVP: open-source data stack (decided 4 Oct 2026)
+For the MVP the backend runs on open data with no paid API keys. Google services are optional adapters that can be switched on later.
+
+| Need | MVP source | Notes |
+|---|---|---|
+| Walking routes + alternatives | **OpenStreetMap walking graph** (OSMnx) routed locally | Generates 2–3 alternatives itself (penalised shortest paths) and can search for a better-supported route, not just score given ones. Avoids Routes API often returning a single walking route. |
+| Lighting | OSM `lit=*` on graph edges + `highway=street_lamp` nodes | VIIRS later |
+| Police, washrooms, hospitals, pharmacies, 24×7 | OSM via **Overpass**, incl. `opening_hours` | |
+| Transit stops | OSM bus stops, metro/rail stations | GTFS later |
+| Historical incidents | NCRB district-level table | Low confidence; nearly constant across routes in a city, so the UI says so |
+| Explanations / Q&A | Pluggable LLM: **Gemini** (free AI Studio key) → local **Ollama** → template fallback | Guardrail checks run on every output regardless of provider |
+| Sunrise/sunset | `astral` | |
+
+- **Cached snapshots:** public Overpass servers time out often, so each demo area is downloaded once (with mirror fallback) into `data/` and the API serves from that cache. The demo never depends on a live third-party server.
+
 
 ## 9. Architecture (Google stack)
 
@@ -267,8 +300,8 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | Dashboard cells shown meet k ≥ 5 | 100% |
 
 ## 13. Open questions
-1. **Pilot city** — which city has the best open data for lighting + transit + incidents? (Candidates: Delhi, Bengaluru, Mumbai, Pune.)
-2. Flutter vs. native Android + web for the hackathon timeline?
+1. ~~**Pilot city**~~ — **Decided: Delhi and Bengaluru** (one demo area each).
+2. Flutter vs. native Android + web for the hackathon timeline? — **Deferred:** backend first; frontend chosen after the API works.
 3. Partner NGO / municipal body for report verification and the dashboard demo?
 4. SMS fallback for trip alerts — budget for an SMS provider or push-only for MVP?
 5. Final name / discreet-mode icon.
@@ -281,5 +314,18 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | **Week 2** | Gemini explain + Q&A; safe stops layer (police, washroom, well-lit); reporting; trip sharing |
 | **Week 3** | Dashboard; privacy hardening; multilingual polish; demo script and video |
 
+> **Revised 4 Oct 2026:** submission is under a week away. Priority order: (1) scoring engine + tests ✅, (2) OSM data cache + routing for Delhi and Bengaluru, (3) safe stops along the route, (4) explanation with guardrail tests, (5) API, (6) frontend. Dashboard, trip sharing and reporting UI only if time allows.
+
 ## 15. Team notes
 - Feature additions from 1 Oct discussion: **nearest police station** (Shreya), **closest washroom** and **well-lit places when planning a trip** — incorporated in §5.5.
+
+## 16. Decision log
+| Date | Decision | Why |
+|---|---|---|
+| 4 Oct 2026 | Pilot cities: **Delhi + Bengaluru** | Best mix of transit open data (Delhi) and OSM lighting coverage (Bengaluru) |
+| 4 Oct 2026 | **Backend first** (Python 3.12, FastAPI); frontend later | Scoring is the core claim and testable without keys or devices |
+| 4 Oct 2026 | **Open-source data stack** for MVP (§8.1) | No API keys/billing needed; Google adapters optional |
+| 4 Oct 2026 | Local OSM routing instead of Routes API | Guaranteed alternatives; lighting tags available per street |
+| 4 Oct 2026 | Cache OSM snapshots per demo area | Public Overpass servers frequently time out |
+| 4 Oct 2026 | Confidence-weighted scoring; "no data" ≠ low score (§7.3) | Avoids penalising unmapped areas, which skews against under-mapped neighbourhoods |
+| 4 Oct 2026 | Scoring covered by unit tests incl. spec invariants (worst-stretch, decay, bands without "safe") | "Make sure it works correctly" |
