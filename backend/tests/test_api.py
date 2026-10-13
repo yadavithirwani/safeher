@@ -78,3 +78,15 @@ def test_layers_and_web_app(client):
     page = client.get("/")
     assert page.status_code == 200 and "SafeHer" in page.text
     assert page.headers["cache-control"] == "no-cache"
+
+
+def test_explain_endpoint_returns_checked_text(client, monkeypatch):
+    monkeypatch.setenv("SAFEHER_LLM", "template")  # no network or API key needed
+    body = {"origin": HAUZ_KHAS, "destination": SAKET, "depart_at": "2026-10-13T21:30:00"}
+    for lang in ("en", "hi"):
+        r = client.post("/api/explain", json={**body, "lang": lang})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["provider"] == "template" and data["checked"] and data["lang"] == lang
+        assert "77" in data["text"] and "67" in data["text"]
+    assert client.post("/api/explain", json={**body, "lang": "fr"}).status_code == 422

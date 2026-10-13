@@ -48,6 +48,7 @@ const state = {
   dark: false,
   markers: { origin: null, dest: null, labels: [], pois: [], reports: [], temp: null },
   planSeq: 0, pendingFit: false,
+  lang: "en", explanation: null, explainSeq: 0,   // explanation = {key, lang, data | null, error?}
 };
 
 /* ---------- small helpers ---------- */
@@ -259,6 +260,7 @@ async function planTrip(fit = false) {
     renderRoutes();
     writeHash();
     updateTimeLabel();
+    loadExplanation();
   } catch (err) {
     if (seq !== state.planSeq) return;
     state.plan = null; drawRoutes(false);
@@ -374,19 +376,10 @@ function renderSkeleton() {
     <div style="flex:1"><i style="width:40%;height:18px"></i><i style="width:70%;height:12px;margin-top:8px"></i></div></div>`).join("");
 }
 
-function comparison(plan) {
-  const routes = plan.routes, best = routes[0], shortest = routes.find((r) => r.label === "Shortest");
-  if (!best || !shortest || best === shortest || best.score == null || shortest.score == null) return "";
-  const extra = best.duration_min - shortest.duration_min;
-  if (best.score - shortest.score < 3) return "";
-  return `<div class="summary">${icon("tips_and_updates")}<span><b>${esc(best.label)}</b> takes ${extra > 0 ? `${extra} min longer` : "about the same time"}
-    and scores <b>${best.score}</b> vs <b>${shortest.score}</b> for the shortest route.</span></div>`;
-}
-
 function renderRoutes() {
   const plan = state.plan;
   if (!plan) return;
-  const html = [comparison(plan)];
+  const html = [explanationCard()];
   plan.routes.forEach((r, i) => {
     const sel = i === state.selected;
     const reasons = r.reasons.filter((x) => !x.startsWith("Street-light data is limited")).slice(0, 2);
@@ -414,9 +407,64 @@ function renderRoutes() {
     flyToPoint(s.lat, s.lon, s.name || s.label);
   }));
   $("#explainBtn")?.addEventListener("click", openExplain);
+  $("#view").querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => {
+    state.lang = b.dataset.lang; loadExplanation();
+  }));
   $("#copyLinkBtn")?.addEventListener("click", async () => {
     try { await navigator.clipboard.writeText(location.href); toast("Route link copied"); } catch { toast("Couldn’t copy. Use the address bar link."); }
   });
+}
+
+/* ---------- AI explanation (Gemini when configured, else a template; always fact-checked) ---------- */
+function explainKey() {
+  return JSON.stringify([state.origin?.lat, state.origin?.lon, state.dest?.lat, state.dest?.lon, departIso()]);
+}
+
+async function loadExplanation() {
+  const key = explainKey(), lang = state.lang;
+  const cur = state.explanation;
+  if (cur && cur.key === key && cur.lang === lang && cur.data) { renderExplanation(); return; }
+  const seq = ++state.explainSeq;
+  state.explanation = { key, lang, data: null };
+  renderExplanation();
+  try {
+    const data = await api("/api/explain", { method: "POST", body: JSON.stringify({
+      origin: { lat: state.origin.lat, lon: state.origin.lon },
+      destination: { lat: state.dest.lat, lon: state.dest.lon },
+      depart_at: departIso(), lang,
+    }) });
+    if (seq !== state.explainSeq) return;
+    state.explanation = { key, lang, data };
+  } catch (err) {
+    if (seq !== state.explainSeq) return;
+    state.explanation = { key, lang, data: null, error: err.message };
+  }
+  renderExplanation();
+}
+
+function explanationCard() {
+  const e = state.explanation;
+  const source = e?.data ? (e.data.provider === "gemini" ? "Explained by Gemini"
+    : e.data.provider === "ollama" ? "Explained by a local model" : "Summary from route data") : "Explaining…";
+  const body = e?.error ? `<p class="ai-text muted">Couldn’t load the explanation: ${esc(e.error)}</p>`
+    : e?.data ? `<p class="ai-text" lang="${esc(e.data.lang)}">${esc(e.data.text)}</p>`
+    : `<div class="ai-loading"><i></i><i></i><i style="width:60%"></i></div>`;
+  const langs = [["en", "EN"], ["hi", "हिं"]].map(([k, l]) =>
+    `<button data-lang="${k}" aria-pressed="${state.lang === k}" aria-label="${k === "en" ? "English" : "Hindi"}">${l}</button>`).join("");
+  return `<section class="ai-card" id="aiCard" aria-live="polite">
+    <div class="ai-head">${icon("auto_awesome")}<span>${source}</span><div class="lang-toggle">${langs}</div></div>
+    ${body}
+    ${e?.data ? `<div class="ai-foot">${icon("fact_check")}Checked against this route’s data: no invented places or numbers</div>` : ""}
+  </section>`;
+}
+
+function renderExplanation() {
+  const card = $("#aiCard");
+  if (!card) return;
+  card.outerHTML = explanationCard();
+  $("#aiCard").querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => {
+    state.lang = b.dataset.lang; loadExplanation();
+  }));
 }
 
 function renderDetail(r) {

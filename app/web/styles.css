@@ -142,9 +142,6 @@ button { cursor: pointer; }
 
 /* View area */
 .view { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
-.summary { padding: 12px 16px 4px; font-size: 13.5px; color: var(--text-2); display: flex; gap: 8px; align-items: flex-start; }
-.summary .msr { color: var(--score-high); font-size: 18px; margin-top: 1px; }
-.summary b { color: var(--text); font-weight: 500; }
 
 .route-card {
   display: block; width: 100%; text-align: left; border: 0; background: transparent;
@@ -177,6 +174,22 @@ button { cursor: pointer; }
 .rc-reasons li { display: flex; gap: 6px; margin-top: 2px; }
 .rc-reasons .msr { font-size: 16px; margin-top: 1px; color: var(--score-high); }
 .rc-reasons li.warn .msr { color: var(--score-low); }
+
+/* AI explanation card */
+.ai-card { margin: 12px 12px 4px; padding: 12px 14px; border-radius: 14px; background: linear-gradient(135deg, var(--primary-soft), var(--surface-2)); }
+.ai-head { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; color: var(--primary); }
+.ai-head .msr { font-size: 18px; font-variation-settings: "FILL" 1; }
+.ai-head > span:not(.msr) { flex: 1; }
+.lang-toggle { display: flex; background: var(--surface); border-radius: 999px; padding: 2px; }
+.lang-toggle button { border: 0; background: transparent; font-size: 12px; font-weight: 500; padding: 3px 9px; border-radius: 999px; color: var(--text-2); }
+.lang-toggle button[aria-pressed="true"] { background: var(--primary); color: #fff; }
+:root[data-theme="dark"] .lang-toggle button[aria-pressed="true"] { color: #1B1B1F; }
+.ai-text { margin: 8px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--text); }
+.ai-text[lang="hi"] { font-family: "Noto Sans Devanagari", Roboto, sans-serif; }
+.ai-foot { display: flex; align-items: center; gap: 5px; margin-top: 8px; font-size: 11.5px; color: var(--text-2); }
+.ai-foot .msr { font-size: 15px; color: var(--score-high); }
+.ai-loading { margin-top: 10px; display: grid; gap: 7px; }
+.ai-loading i { display: block; height: 11px; border-radius: 6px; background: var(--surface); animation: pulse 1.2s ease-in-out infinite; }
 
 /* Route detail */
 .detail { padding: 4px 16px 16px 16px; }

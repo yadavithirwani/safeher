@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from . import signals as sig
 from .areas import AREAS, REPO_ROOT, area_for
 from .geo import LatLon, haversine_m
+from .explain import LANGUAGES, explain
 from .plan import DISCLAIMER, KIND_LABELS, plan
 from .pois import SAFE_SPACE_KINDS
 from .routing import load_area
@@ -87,6 +88,10 @@ class PlanRequest(BaseModel):
     origin: Point
     destination: Point
     depart_at: datetime | None = None  # ISO 8601; naive = local time in the area; omitted = now
+
+
+class ExplainRequest(PlanRequest):
+    lang: Literal[tuple(LANGUAGES)] = "en"  # type: ignore[valid-type]
 
 
 class ReportRequest(BaseModel):
@@ -162,6 +167,34 @@ def plan_trip(req: PlanRequest):
         return plan(o, d, when, _reports_for_planning())
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+
+
+_place_names: dict[str, set[str]] = {}
+
+
+def _area_place_names(area_id: str) -> set[str]:
+    """Every named place in the area: an explanation may only name the ones in its own facts."""
+    if area_id not in _place_names:
+        names = {p.name for p in load_area(area_id).pois if p.name}
+        names |= {n for n, _, _ in LANDMARKS.get(area_id, [])}
+        _place_names[area_id] = names
+    return _place_names[area_id]
+
+
+@app.post("/api/explain")
+def explain_trip(req: ExplainRequest):
+    """Plain-language comparison of the planned routes (Gemini when configured, else a template)."""
+    o, d = (req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)
+    when = _parse_departure(req.depart_at, o)
+    try:
+        p = plan(o, d, when, _reports_for_planning())
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    # Landmarks at the start or end of the trip may be named; any other place not in the facts may not.
+    at_endpoints = {n for n, lat, lon in LANDMARKS.get(p["area"]["id"], [])
+                    if min(haversine_m((lat, lon), o), haversine_m((lat, lon), d)) < 150}
+    result = explain(p, req.lang, forbidden_names=_area_place_names(p["area"]["id"]) - at_endpoints)
+    return {k: result[k] for k in ("text", "provider", "model", "lang", "checked")}
 
 
 NearbyKind = Literal["police", "toilets", "hospital", "pharmacy", "open_places"]

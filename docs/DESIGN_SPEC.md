@@ -77,6 +77,22 @@ See [§7 Scoring model](#7-scoring-model). Every number shown to the user can be
 - Voice input for Q&A (speech-to-text) for hands-free use.
 - **Guardrails:** Gemini may not invent facts, never says "safe", must cite which signal drives a claim, and must surface 112 if the user describes an emergency. Uses function calling to fetch nearby places rather than recalling them.
 
+**Implemented (13 Oct 2026): explanation step** (`backend/safeher/explain.py`, `POST /api/explain`)
+- **Facts only:** the plan is reduced to a fact sheet (per route: minutes, km, score, band, signal values with confidence, reasons, weak stretches, named stops; plus departure time and data notes). The model sees only this JSON.
+- **Providers:** `SAFEHER_LLM=auto` (default) uses **Gemini** (`GEMINI_API_KEY` in `backend/.env`; model `GEMINI_MODEL`, default `gemini-2.5-flash`), then the **template**. A local model through Ollama is opt-in (`SAFEHER_LLM=ollama`). `SAFEHER_LLM=template` forces the template.
+- **Guardrail check on every answer, from any provider.** An answer fails if it:
+  - uses "safe", "safest", "unsafe", "dangerous", "guarantee" or "risk-free". In Hindi, bare सुरक्षित, असुरक्षित, खतरनाक and गारंटी are banned; "अधिक सुरक्षित" (safer) is allowed.
+  - contains any number not in the facts (or simple differences between them, the departure time, 100 or 112).
+  - fails to state the scores of the routes it compares.
+  - names a place in the area that isn't in the facts. Trip start and end landmarks are allowed.
+  - is in the wrong language, mixes scripts inside a word, or uses unexpected scripts.
+  - runs longer than about three sentences.
+- A failing answer is retried once with the problems listed. If it still fails, the template is used. The template passes the check in all 20 tested cases (2 cities × 5 times × 2 languages).
+- **Languages:** English and Hindi at launch for explanations (the other spec languages to follow).
+- **UI:** an explanation card above the route cards with an EN | हिं toggle. It labels its source ("Explained by Gemini" / "Summary from route data") and shows "Checked against this route's data".
+- **Finding:** in testing, the local `phi3:mini` answers failed in English (used "safe", invented a number). Its Hindi passed the original checks but was unusable: mixed scripts, Cyrillic letters, wrong route times, 6–12 s per answer. The script, mixed-word and must-state-scores checks were added because of this, and the local model was made opt-in.
+- **Not yet:** the "Ask SafeHer" chat (function calling, 112 on emergency) and voice input.
+
 ### 5.5 Safe stops — police, washrooms, well-lit places (added from team discussion)
 A dedicated layer and quick-action bar for essential stops **on or near the planned route**, not just near the user:
 
@@ -372,7 +388,7 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | **Week 2** | Gemini explain + Q&A; safe stops layer (police, washroom, well-lit); reporting; trip sharing |
 | **Week 3** | Dashboard; privacy hardening; multilingual polish; demo script and video |
 
-> **Revised 4 Oct 2026:** submission is under a week away. Priority order: (1) scoring engine + tests ✅, (2) OSM data cache + routing for Delhi and Bengaluru ✅, (3) safe stops along the route, (4) explanation with guardrail tests, (5) API ✅, (6) demo web app ✅. Dashboard, trip sharing and reporting UI only if time allows.
+> **Revised 4 Oct 2026:** submission is under a week away. Priority order: (1) scoring engine + tests ✅, (2) OSM data cache + routing for Delhi and Bengaluru ✅, (3) safe stops along the route ✅, (4) explanation with guardrail tests ✅, (5) API ✅, (6) demo web app ✅. Dashboard, trip sharing and reporting UI only if time allows.
 
 ## 15. Team notes
 - Feature additions from 1 Oct discussion: **nearest police station** (Shreya), **closest washroom** and **well-lit places when planning a trip** — incorporated in §5.5.
@@ -397,3 +413,5 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 13 Oct 2026 | Demo frontend is a **web app** (MapLibre + CARTO, no build step) instead of Flutter; Flutter stays the post-hackathon target | Node and Flutter aren't installed, the deadline is days away, a web app runs on any phone and laptop for judges, and trip-share links need a web view anyway |
 | 13 Oct 2026 | Map coloured per ~50 m stretch by score; amber glow only for *measured* lighting | Makes "this stretch is weaker" visible without overstating estimated lighting |
 | 13 Oct 2026 | Hand-off to Google Maps for navigation with waypoints | Spec §3 non-goal (no turn-by-turn); waypoints keep the chosen route |
+| 13 Oct 2026 | Explanations: Gemini → template; every answer fact-checked; local model opt-in (§5.4) | Scores stay rule-based; AI only words them. Template guarantees a faithful answer when Gemini is off or fails |
+| 13 Oct 2026 | Explanation card replaces the static comparison line | Same content; avoids saying it twice |
