@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+from contextlib import asynccontextmanager, suppress
 import json
 import threading
 from datetime import datetime, timezone
@@ -13,6 +16,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from . import trips
 from . import signals as sig
 from .areas import AREAS, REPO_ROOT, area_for
 from .geo import LatLon, haversine_m
@@ -47,7 +51,26 @@ LANDMARKS = {
     ],
 }
 
-app = FastAPI(title="SafeHer API", version="0.1.0")
+async def clean_expired_trips():
+    while True:
+        try:
+            await asyncio.to_thread(trips.purge_expired)
+        except Exception:
+            logging.exception("Trip expiry cleanup failed")
+        await asyncio.sleep(60)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    cleanup = asyncio.create_task(clean_expired_trips())
+    yield
+    cleanup.cancel()
+    with suppress(asyncio.CancelledError):
+        await cleanup
+
+
+app = FastAPI(title="SafeHer API", version="0.1.0", lifespan=lifespan)
+app.include_router(trips.router)
 
 
 @app.middleware("http")
@@ -56,6 +79,9 @@ async def revalidate_web_assets(request, call_next):
     response = await call_next(request)
     if request.url.path == "/" or request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache"
+    if request.url.path.startswith("/api/trips") or request.url.path == "/live":
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
     return response
 
 
@@ -273,6 +299,10 @@ def create_report(req: ReportRequest):
 
 if WEB_DIR.exists():
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+
+    @app.get("/live", include_in_schema=False)
+    def live_view():
+        return FileResponse(WEB_DIR / "live.html")
 
     @app.get("/", include_in_schema=False)
     def index():

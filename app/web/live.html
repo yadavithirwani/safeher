@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>SafeHer · live location</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="/static/sharing.css">
+</head>
+<body class="live-page">
+  <header class="live-header">
+    <h1>SafeHer · live location</h1>
+    <p id="liveStatus" role="status">Connecting…</p>
+    <p>Foreground-only sharing. Updates may pause when the sender locks their phone.</p>
+    <p id="liveExpiry"></p>
+    <button id="followLocation" type="button">Center on latest location</button>
+    <p>Do not rely on this map for emergency response. In an emergency, call <a href="tel:112">112</a>.</p>
+  </header>
+  <main id="liveMap" aria-label="Shared route and latest location"></main>
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js"></script>
+  <script src="/static/live.js"></script>
+</body>
+</html>
