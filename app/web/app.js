@@ -86,7 +86,7 @@ let map;
 
 function initMap(center) {
   map = new maplibregl.Map({
-    container: "map", style: state.meta.basemaps.light, center: [center[1], center[0]], zoom: 14.2,
+    container: "map", style: basemapStyle(false), center: [center[1], center[0]], zoom: 14.2,
     attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false,
   });
   map.touchZoomRotate.disableRotation();
@@ -94,6 +94,7 @@ function initMap(center) {
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
   map.on("style.load", addLayers);
   map.on("click", onMapClick);
+  map.on("moveend", updateGoogleAttribution);
   map.on("zoomend", () => drawLabels());
   // If the page was laid out while hidden (e.g. a background tab), the canvas starts at 400×300.
   new ResizeObserver(() => map.resize()).observe(document.getElementById("map"));
@@ -138,11 +139,36 @@ async function loadOverlays() {
   try { map.getSource("overlays").setData(await api(`/api/layers/${state.area.id}`)); } catch { /* overlays are optional */ }
 }
 
+/* Google mode: Google's own map tiles, so Google Places/Routes content may be shown on it. */
+const googleOn = (feature) => Boolean(state.meta?.google?.[feature]);
+
+function basemapStyle(dark) {
+  if (!googleOn("map_tiles")) return dark ? state.meta.basemaps.dark : state.meta.basemaps.light;
+  const style = dark ? "dark" : "light";
+  return {
+    version: 8,
+    sources: { google: { type: "raster", tileSize: 256, maxzoom: 22,
+      tiles: [`${location.origin}/api/google/tiles/${style}/{z}/{x}/{y}`] } },
+    layers: [{ id: "google-basemap", type: "raster", source: "google" }],
+  };
+}
+
+const updateGoogleAttribution = debounce(async () => {
+  const el = $("#googleAttribution");
+  if (!el || !googleOn("map_tiles") || !map) return;
+  const b = map.getBounds();
+  const q = new URLSearchParams({ style: state.dark ? "dark" : "light", zoom: String(Math.round(map.getZoom())),
+    north: b.getNorth().toFixed(5), south: b.getSouth().toFixed(5), east: b.getEast().toFixed(5), west: b.getWest().toFixed(5) });
+  try { el.textContent = (await api(`/api/google/attribution?${q}`)).copyright || "Map data © Google"; }
+  catch { el.textContent = "Map data © Google"; }
+}, 400);
+
 function setDark(dark) {
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   if (dark === state.dark) return;
   state.dark = dark;
-  map.setStyle(dark ? state.meta.basemaps.dark : state.meta.basemaps.light, { diff: false }); // style.load re-adds our layers
+  map.setStyle(basemapStyle(dark), { diff: false }); // style.load re-adds our layers
+  updateGoogleAttribution();
 }
 
 function applyTheme() {
@@ -205,12 +231,21 @@ function setupSearch(inputSel, listSel, which) {
         <small>SafeHer has data for ${esc(state.areas.map((a) => `${a.name} (${a.city})`).join(" and "))} only.</small></div></li>`;
       return;
     }
-    const glyph = (r) => (r.kind === "landmark" ? "location_on" : r.kind === "street" ? "add_road" : "place");
+    const glyph = (r) => (r.source === "google" ? "travel_explore" : r.kind === "landmark" ? "location_on"
+      : r.kind === "street" ? "add_road" : "place");
     list.innerHTML = items.map((r, i) => `<li role="option" data-i="${i}" aria-selected="${i === active}">
-      ${icon(glyph(r))}<div><b>${esc(r.name)}</b><small>${esc(r.detail)}${r.other_area ? " · switches city" : ""}</small></div></li>`).join("");
+      ${icon(glyph(r))}<div><b>${esc(r.name)}</b><small>${esc(r.detail)}${r.other_area ? " · switches city" : ""}</small></div></li>`).join("")
+      + (items.some((r) => r.source === "google") ? `<li class="powered-by" aria-hidden="true">Search results include Google Maps</li>` : "");
   };
-  const choose = (r) => {
+  let session = null; // Google Autocomplete session: one per search, ended by a Place Details call
+  const choose = async (r) => {
     items = []; empty = ""; render(); input.blur();
+    if (r.place_id) {
+      try {
+        const p = await api(`/api/google/place/${encodeURIComponent(r.place_id)}?session=${session || ""}`);
+        r = { ...r, lat: p.lat, lon: p.lon, area: p.area };
+      } catch (err) { toast(err.message); return; } finally { session = null; }
+    }
     if (r.area && r.area !== state.area.id) switchArea(r.area, false, false); // other city: start fresh there
     setPoint(which, { name: r.name, lat: r.lat, lon: r.lon });
     planTrip(true);
@@ -219,7 +254,9 @@ function setupSearch(inputSel, listSel, which) {
   const query = debounce(async () => {
     const q = input.value.trim();
     if (!q) { items = landmarkItems(); active = -1; empty = ""; return render(); }
-    try { items = await api(`/api/search?q=${encodeURIComponent(q)}&area=${state.area.id}`); } catch { items = []; }
+    if (googleOn("autocomplete") && !session) session = crypto.randomUUID?.() || String(Date.now());
+    const s = googleOn("autocomplete") ? `&session=${session}` : "";
+    try { items = await api(`/api/search?q=${encodeURIComponent(q)}&area=${state.area.id}${s}`); } catch { items = []; }
     empty = items.length ? "" : q;
     active = items.length ? 0 : -1; render();
   }, 120);
@@ -389,11 +426,12 @@ function renderRoutes() {
           <div class="rc-line1"><span class="rc-dur">${fmtDur(r.duration_min)}</span><span class="rc-dist">${fmtDist(r.distance_m)}</span></div>
           <div class="rc-line2">
             <span class="badge band-${bandKey(r.score)}">${esc(r.band)}</span>
-            <span class="badge label-badge${i === 0 && r.label === "Most support" ? " best" : ""}">${i === 0 && r.label === "Most support" ? icon("verified") : ""}${esc(r.label)}</span>
+            <span class="badge label-badge${i === 0 && r.label === "Most support" ? " best" : ""}${r.source === "google" ? " google" : ""}">${i === 0 && r.label === "Most support" ? icon("verified") : ""}${r.source === "google" ? icon("map") : ""}${esc(r.label)}</span>
+            ${r.also_google ? `<span class="badge label-badge google">${icon("map")}Also Google's route</span>` : ""}
           </div>
         </div>
       </div>
-      <ul class="rc-reasons"><li>${icon("alt_route")}<span>${esc(backupSummary(r.plan_b))}</span></li>${reasons.map((x) => `<li>${icon("check_circle")}<span>${esc(x)}</span></li>`).join("")}
+      <ul class="rc-reasons">${r.plan_b ? `<li>${icon("alt_route")}<span>${esc(backupSummary(r.plan_b))}</span></li>` : ""}${reasons.map((x) => `<li>${icon("check_circle")}<span>${esc(x)}</span></li>`).join("")}
         ${weak ? `<li class="warn">${icon("warning")}<span>${weak} stretch${weak > 1 ? "es" : ""} with less support (${fmtDist(r.weak_stretches.reduce((a, w) => a + w.length_m, 0))})</span></li>` : ""}
       </ul>
     </button>${sel ? renderDetail(r) : ""}`);
@@ -401,6 +439,7 @@ function renderRoutes() {
   $("#view").innerHTML = html.join("");
   $("#view").querySelectorAll(".route-card").forEach((b) => b.addEventListener("click", () => selectRoute(b.dataset.i)));
   $("#view").querySelectorAll("[data-weak]").forEach((b) => b.addEventListener("click", () => showWeak(Number(b.dataset.weak))));
+  $("#view").querySelectorAll("[data-sv]").forEach((b) => b.addEventListener("click", () => openStreetView(Number(b.dataset.sv))));
   $("#view").querySelectorAll("[data-stop]").forEach((b) => b.addEventListener("click", () => {
     const s = plan.routes[state.selected].stops[Number(b.dataset.stop)];
     flyToPoint(s.lat, s.lon, s.name || s.label);
@@ -477,7 +516,8 @@ function renderDetail(r) {
   }).join("");
   const weak = r.weak_stretches.map((w, i) => `<li><button data-weak="${i}">
       <span class="ico" style="background:${COLORS.low}">${icon("warning")}</span>
-      <div><b>${fmtDist(w.length_m)} stretch · score ${w.score}</b><small>Mainly: ${esc(w.main_factors.join(", "))}</small></div></button></li>`).join("");
+      <div><b>${fmtDist(w.length_m)} stretch · score ${w.score}</b><small>Mainly: ${esc(w.main_factors.join(", "))}</small></div></button>
+      ${googleOn("streetview") ? `<button class="btn sv-btn" data-sv="${i}" aria-label="Street View of this stretch">${icon("streetview")}Street View</button>` : ""}</li>`).join("");
   const stops = r.stops.map((s, i) => {
     const st = KIND_STYLE[s.kind] || KIND_STYLE.open_places;
     const status = s.open ? (s.hours_assumed ? "Likely open (typical hours)" : "Open now") : "Probably closed now";
@@ -497,8 +537,30 @@ function renderDetail(r) {
     <details class="notes"><summary>About this data</summary><ul>
       ${state.plan.data_notes.map((n) => `<li>${esc(n)}</li>`).join("")}
       ${r.reasons.filter((x) => x.startsWith("Street-light data is limited")).map((n) => `<li>${esc(n)}</li>`).join("")}
-      <li>Map data ${esc(state.plan.attribution)} · basemap © CARTO. Weights v${esc(state.plan.weights_version)}.</li></ul></details>
+      <li>Map data ${esc(state.plan.attribution)} · basemap ${googleOn("map_tiles") ? "© Google" : "© CARTO"}. Weights v${esc(state.plan.weights_version)}.</li></ul></details>
   </div>`;
+}
+
+function bearing([lat1, lon1], [lat2, lon2]) {
+  const r = Math.PI / 180, y = Math.sin((lon2 - lon1) * r) * Math.cos(lat2 * r);
+  const x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lon2 - lon1) * r);
+  return (Math.atan2(y, x) / r + 360) % 360;
+}
+
+async function openStreetView(i) {
+  const w = state.plan.routes[state.selected].weak_stretches[i];
+  const mid = [(w.start[0] + w.end[0]) / 2, (w.start[1] + w.end[1]) / 2];
+  showWeak(i);
+  const dlg = $("#streetViewDialog"), img = $("#streetViewImg"), note = $("#streetViewNote");
+  img.hidden = true; note.textContent = "Checking for Street View imagery…"; dlg.showModal();
+  try {
+    const { available } = await api(`/api/google/streetview/available?lat=${mid[0]}&lon=${mid[1]}`);
+    if (!available) { note.textContent = "Google has no Street View imagery for this stretch."; return; }
+    img.src = `/api/google/streetview?lat=${mid[0]}&lon=${mid[1]}&heading=${bearing(w.start, w.end).toFixed(0)}`;
+    img.alt = `Street View of the ${fmtDist(w.length_m)} stretch scoring ${w.score}`;
+    img.hidden = false;
+    note.textContent = `${fmtDist(w.length_m)} stretch · score ${w.score} · mainly ${w.main_factors.join(", ")}. Imagery is usually taken in daytime and may be years old.`;
+  } catch (err) { note.textContent = err.message; }
 }
 
 function showWeak(i) {
@@ -571,7 +633,9 @@ async function showNearby(kind) {
     const items = res.results.map((p, i) => {
       const ps = KIND_STYLE[p.kind] || st;
       state.markers.pois.push(poiMarker(p, () => flyToPoint(p.lat, p.lon, p.name)));
-      const status = p.open ? (p.hours_assumed ? "Likely open (typical hours)" : "Open now") : "Probably closed now";
+      const status = p.hours_source === "google"
+        ? (p.open === true ? "Open now · Google" : p.open === false ? "Closed now · Google" : "Hours unknown · Google")
+        : p.open ? (p.hours_assumed ? "Likely open (typical hours)" : "Open now") : "Probably closed now";
       return `<li><div><span class="ico" style="background:${ps.color}">${icon(ps.icon)}</span>
         <div style="flex:1;min-width:0"><b>${esc(p.name)}</b><small>${esc(ps.label)} · ${fmtDist(p.distance_m)} · ${status}${p.lamps_nearby ? " · street lamps nearby" : ""}</small></div>
         ${p.phone ? `<a class="icon-btn" href="tel:${esc(p.phone.split(";")[0])}" aria-label="Call">${icon("call")}</a>` : ""}
@@ -736,6 +800,7 @@ function setupSheet() {
 /* ---------- boot ---------- */
 async function main() {
   [state.areas, state.meta] = await Promise.all([api("/api/areas"), api("/api/meta")]);
+  $("#googleBrand").hidden = !googleOn("map_tiles");
   $("#helplines").innerHTML = state.meta.helplines.filter((h) => h.number !== "112")
     .map((h) => `<a href="tel:${h.number}"><b>${h.number}</b><span>${esc(h.label)}</span></a>`).join("");
 

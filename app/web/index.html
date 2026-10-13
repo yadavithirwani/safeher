@@ -89,6 +89,7 @@
     <button class="fab-sos" id="sosBtn" aria-label="SOS: emergency numbers">SOS</button>
   </div>
 
+  <div class="google-brand" id="googleBrand" hidden><span class="google-logo" aria-label="Google Maps">Google Maps</span><span id="googleAttribution">Map data © Google</span></div>
   <div class="mode-banner" id="modeBanner" hidden></div>
   <div class="toast" id="toast" role="status" hidden></div>
 
@@ -97,6 +98,13 @@
     <a class="sos-call" href="tel:112"><span class="msr">call</span><span><b>112</b> Emergency: police, fire, ambulance</span></a>
     <div class="sos-list" id="helplines"></div>
     <p class="muted small">Calls open your phone’s dialler. SafeHer never replaces emergency services.</p>
+  </dialog>
+
+  <dialog id="streetViewDialog" class="dialog dialog-wide">
+    <form method="dialog" class="dialog-head"><h2>Street View</h2><button class="icon-btn" aria-label="Close"><span class="msr">close</span></button></form>
+    <img id="streetViewImg" class="sv-img" alt="" hidden>
+    <p id="streetViewNote" class="muted small"></p>
+    <p class="muted small">Imagery © Google</p>
   </dialog>
 
   <dialog id="explainDialog" class="dialog dialog-wide">
