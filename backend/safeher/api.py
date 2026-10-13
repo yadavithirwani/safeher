@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager, suppress
+import copy
 import json
 import threading
 import time
@@ -99,10 +100,55 @@ def _load_reports() -> list[dict]:
     return [json.loads(line) for line in REPORTS_FILE.read_text().splitlines() if line.strip()]
 
 
+_reports_cache: tuple[tuple, list] = ((), [])
+
+
+def _reports_version() -> tuple:
+    try:
+        st = REPORTS_FILE.stat()
+        return (str(REPORTS_FILE), st.st_mtime_ns, st.st_size)
+    except FileNotFoundError:
+        return (str(REPORTS_FILE), 0, 0)
+
+
 def _reports_for_planning() -> list[tuple[LatLon, sig.Report]]:
-    return [((r["lat"], r["lon"]), sig.Report(r["category"], datetime.fromisoformat(r["created_at"]),
-                                              r["verification"]))
-            for r in _load_reports()]
+    """Parsed once per change of the reports file, not on every request."""
+    global _reports_cache
+    version = _reports_version()
+    if _reports_cache[0] != version:
+        rows = [((r["lat"], r["lon"]), sig.Report(r["category"], datetime.fromisoformat(r["created_at"]),
+                                                  r["verification"])) for r in _load_reports()]
+        _reports_cache = (version, rows)
+    return _reports_cache[1]
+
+
+# Planned trips, shared by /api/plan and /api/explain (which used to re-plan from scratch).
+# Keyed by the exact inputs, including the reports file version, so a new report invalidates it.
+_plan_cache: "OrderedDict[tuple, tuple[float, dict]]" = OrderedDict()
+_plan_lock = threading.Lock()
+PLAN_CACHE_TTL_S = 120
+PLAN_CACHE_MAX = 256
+
+
+def _planned(o: LatLon, d: LatLon, when: datetime) -> dict:
+    key = (round(o[0], 6), round(o[1], 6), round(d[0], 6), round(d[1], 6),
+           when.astimezone(timezone.utc).replace(second=0, microsecond=0).isoformat(), _reports_version(),
+           g_on("routes"))
+    with _plan_lock:
+        hit = _plan_cache.get(key)
+        if hit and time.time() - hit[0] < PLAN_CACHE_TTL_S:
+            _plan_cache.move_to_end(key)
+            return copy.deepcopy(hit[1])
+    external, note = _google_routes(o, d)
+    result = plan(o, d, when, _reports_for_planning(), external, float(GOOGLE["route_edge_match_m"]))
+    if note:
+        result["data_notes"].append(note)
+    result["google_map"] = g_on("map_tiles")
+    with _plan_lock:
+        _plan_cache[key] = (time.time(), result)
+        while len(_plan_cache) > PLAN_CACHE_MAX:
+            _plan_cache.popitem(last=False)
+    return copy.deepcopy(result)
 
 
 # --- Models -------------------------------------------------------------------------------
@@ -208,15 +254,10 @@ def _parse_departure(depart_at: datetime | None, p: LatLon) -> datetime:
 def plan_trip(req: PlanRequest):
     o, d = (req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)
     when = _parse_departure(req.depart_at, o)
-    external, note = _google_routes(o, d)
     try:
-        result = plan(o, d, when, _reports_for_planning(), external, float(GOOGLE["route_edge_match_m"]))
+        return _planned(o, d, when)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
-    if note:
-        result["data_notes"].append(note)
-    result["google_map"] = g_on("map_tiles")
-    return result
 
 
 _route_cache: "OrderedDict[tuple, list]" = OrderedDict()
@@ -261,7 +302,7 @@ def explain_trip(req: ExplainRequest):
     o, d = (req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)
     when = _parse_departure(req.depart_at, o)
     try:
-        p = plan(o, d, when, _reports_for_planning())
+        p = _planned(o, d, when)  # same routes as the cards, including any Google route
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     # Landmarks at the start or end of the trip may be named; any other place not in the facts may not.

@@ -99,3 +99,62 @@ def test_route_validation_and_viewer_page(client):
     assert page.headers["referrer-policy"] == "no-referrer"
     assert page.headers["cache-control"] == "no-store"
     assert "Foreground-only" in page.text
+
+
+def test_concurrent_sharing_sessions_do_not_lock_the_database(tmp_path, monkeypatch):
+    """Found by load testing: parallel requests failed with 'database is locked'."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from fastapi.testclient import TestClient
+
+    from safeher import api, trips
+    monkeypatch.setattr(trips, "DB_FILE", tmp_path / "trips.sqlite3")
+    client = TestClient(api.app, raise_server_exceptions=False)
+
+    def session(i):
+        r = client.post("/api/trips", json={"route": [[77.2067, 28.5433], [77.2195, 28.5286]]})
+        if r.status_code != 201:
+            return r.status_code
+        t = r.json()
+        auth = {"Authorization": f"Bearer {t['owner_token']}"}
+        codes = [client.put(f"/api/trips/{t['viewer_token']}/location", json={"lat": 28.54, "lon": 77.21, "accuracy_m": 5},
+                            headers=auth).status_code,
+                 client.get(f"/api/trips/{t['viewer_token']}").status_code,
+                 client.delete(f"/api/trips/{t['viewer_token']}", headers=auth).status_code]
+        return max(codes)
+
+    with ThreadPoolExecutor(32) as pool:
+        results = list(pool.map(session, range(200)))
+    assert all(code < 500 for code in results)
+
+
+def test_stopped_location_leaves_no_bytes_on_disk(tmp_path, monkeypatch):
+    """Privacy: after Stop, the exact location must not survive in the database file or its WAL log."""
+    import struct
+
+    from fastapi.testclient import TestClient
+
+    from safeher import api, trips
+    monkeypatch.setattr(trips, "DB_FILE", tmp_path / "trips.sqlite3")
+    client = TestClient(api.app)
+    lat, lon = 28.5437123456789, 77.2061987654321  # distinctive values to search for
+    t = client.post("/api/trips", json={"route": [[77.2067, 28.5433], [77.2195, 28.5286]]}).json()
+    auth = {"Authorization": f"Bearer {t['owner_token']}"}
+    assert client.put(f"/api/trips/{t['viewer_token']}/location", json={"lat": lat, "lon": lon, "accuracy_m": 5},
+                      headers=auth).status_code == 204
+    needles = [struct.pack(">d", lat), struct.pack(">d", lon), trips.digest(t["viewer_token"]).encode()]
+
+    def on_disk():
+        blobs = b"".join(f.read_bytes() for f in tmp_path.iterdir() if f.name.startswith("trips.sqlite3"))
+        return [n in blobs for n in needles]
+
+    assert any(on_disk())  # sanity: while sharing, the point is stored
+    # Another worker process keeps its own connection open, so SQLite won't tidy the log on close.
+    import sqlite3
+    other_worker = sqlite3.connect(trips.DB_FILE)
+    other_worker.execute("SELECT count(*) FROM trips").fetchone()
+    try:
+        assert client.delete(f"/api/trips/{t['viewer_token']}", headers=auth).status_code == 204
+        assert not any(on_disk())
+    finally:
+        other_worker.close()

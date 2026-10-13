@@ -6,6 +6,7 @@ import json
 import math
 import secrets
 import sqlite3
+import threading
 import time
 from contextlib import closing, contextmanager
 from pathlib import Path
@@ -37,18 +38,72 @@ class TripRequest(BaseModel):
         return route
 
 
-@contextmanager
-def database():
+# Concurrency: WAL lets readers proceed while one process writes (the server runs several worker
+# processes); the in-process lock keeps this process's threads from queueing on SQLite's busy
+# handler. Privacy is unchanged: secure_delete overwrites deleted rows, and after any deletion the
+# WAL is checkpointed and truncated so a stopped or expired location doesn't linger in the log.
+_DB_LOCK = threading.Lock()
+_ready: set[str] = set()
+
+
+def _connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_FILE, timeout=10, isolation_level=None)  # autocommit; we BEGIN explicitly
+    conn.execute("PRAGMA secure_delete=ON")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _setup() -> None:
+    key = str(DB_FILE)
+    if key in _ready:
+        return
     DB_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with closing(sqlite3.connect(DB_FILE, timeout=10)) as conn, conn:
-        DB_FILE.chmod(0o600)
-        conn.execute("PRAGMA secure_delete=ON")
-        conn.row_factory = sqlite3.Row
+    with closing(_connect()) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("""CREATE TABLE IF NOT EXISTS trips (
             viewer TEXT PRIMARY KEY, owner_hash TEXT NOT NULL, expires REAL NOT NULL,
             route TEXT NOT NULL, lat REAL, lon REAL, accuracy REAL, updated REAL)""")
-        conn.execute("DELETE FROM trips WHERE expires <= ?", (time.time(),))
-        yield conn
+    for f in (DB_FILE, DB_FILE.with_name(DB_FILE.name + "-wal"), DB_FILE.with_name(DB_FILE.name + "-shm")):
+        if f.exists():
+            f.chmod(0o600)
+    _ready.add(key)
+
+
+def _wipe_log(conn: sqlite3.Connection) -> None:
+    """Fold the WAL into the database (where secure_delete overwrote deleted rows) and empty it."""
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+
+class _Tx:
+    """Connection wrapper used inside `database()`; `deleted()` asks for a log wipe after commit."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn, self.wipe = conn, False
+
+    def execute(self, *args):
+        cur = self.conn.execute(*args)
+        if str(args[0]).lstrip().upper().startswith("DELETE") and cur.rowcount > 0:
+            self.wipe = True
+        return cur
+
+
+@contextmanager
+def database():
+    with _DB_LOCK:  # setup too: two threads switching a new file to WAL at once would collide
+        _setup()
+    with _DB_LOCK, closing(_connect()) as conn:
+        tx = _Tx(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            tx.execute("DELETE FROM trips WHERE expires <= ?", (time.time(),))
+            yield tx
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        if tx.wipe:
+            _wipe_log(conn)
 
 
 def digest(token: str) -> str:

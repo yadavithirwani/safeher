@@ -181,7 +181,7 @@ def google_on(monkeypatch, tmp_path):
         monkeypatch.setattr(google, "client", lambda: make_client(fake))
         monkeypatch.setattr(google, "feature", lambda name: name in features)
         monkeypatch.setattr(api, "REPORTS_FILE", tmp_path / "reports.jsonl")
-        api._route_cache.clear()
+        api._route_cache.clear(); api._plan_cache.clear()
         return TestClient(api.app)
     return setup
 
