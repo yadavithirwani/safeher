@@ -25,6 +25,12 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 
 Recording instructions: [demo/README.md](demo/README.md). The new recorder never overwrites either version.
 
+## Latest demo · Plan B Coverage + live sharing
+
+[![SafeHer demo featuring Plan B Coverage and live location sharing.](docs/media/safeher-demo-plan-b-and-live-sharing-poster.jpg)](docs/media/safeher-demo-plan-b-and-live-sharing.mp4)
+
+**[Watch the latest demo](docs/media/safeher-demo-plan-b-and-live-sharing.mp4)** — the previous walkthrough and live-sharing chapter, followed by Plan B route comparisons, departure-time changes, coverage-gap highlighting, and least-covered-point focus. The new chapter uses real API calculations and a labelled cached OSM map. Both previous videos remain unchanged.
+
 ## Plan B Coverage
 
 Route cards now show a separate **Plan B Coverage** estimate: the longest sampled walk to a potentially available help point, route share within five minutes, and clickable coverage gaps. It does not change safety scores or route ranking.

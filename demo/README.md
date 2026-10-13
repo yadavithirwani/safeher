@@ -2,6 +2,22 @@
 
 The original `record_demo.py`, `docs/media/safeher-demo.mp4`, and its poster are preserved.
 
+## Latest demo: Plan B Coverage + live sharing
+
+`record_demo_plan_b.py` appends a newly recorded Plan B chapter to the live-sharing demo as a separate third version:
+
+- `docs/media/safeher-demo-plan-b-and-live-sharing.mp4`
+- `docs/media/safeher-demo-plan-b-and-live-sharing-poster.jpg`
+
+It shows real API-derived coverage estimates, changes departure to 11:45 PM, compares Shortest and Alternative routes, highlights gaps, focuses the least-covered sampled point, and explains uncertainty. No GPS access or new sharing sessions are needed for this chapter. The cached-map approach and requirements below also apply. Earlier videos and recorders are not modified.
+
+```bash
+# From repo root, with the server running and cached MapLibre assets available:
+.venv/bin/python demo/record_demo_plan_b.py
+```
+
+Add `--headed` to watch. Existing outputs are never overwritten; use a new `NAME` for future revisions.
+
 ## Updated demo: live sharing
 
 `record_demo_live.py` records a new live-sharing chapter and appends it to the original footage in a **new** file:
