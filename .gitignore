@@ -41,3 +41,7 @@ backend/var/
 
 # Demo recordings
 demo/out/
+
+# Hypothesis example database
+.hypothesis/
+backend/.hypothesis/

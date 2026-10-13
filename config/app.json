@@ -108,5 +108,6 @@
         ]
       }
     ]
-  }
+  },
+  "departure_window_days": 366
 }

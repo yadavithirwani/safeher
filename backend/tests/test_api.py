@@ -92,3 +92,9 @@ def test_explain_endpoint_returns_checked_text(client, monkeypatch):
         assert data["provider"] == "template" and data["checked"] and data["lang"] == lang
         assert str(best["score"]) in data["text"] and str(shortest["score"]) in data["text"]
     assert client.post("/api/explain", json={**body, "lang": "fr"}).status_code == 422
+
+
+def test_report_far_from_any_street_is_refused(client):
+    """Found by fuzzing: a tap in the middle of Halasuru Lake used to crash the server."""
+    r = client.post("/api/reports", json={"lat": 12.986328125, "lon": 77.62890625, "category": "harassment"})
+    assert r.status_code == 422 and "near a street" in r.json()["detail"]

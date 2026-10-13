@@ -5,7 +5,7 @@ requires-python = ">=3.11"
 dependencies = ["fastapi", "uvicorn[standard]", "httpx", "astral", "osmnx>=2.0", "opening-hours-py", "numpy", "blackmarblepy", "python-dotenv"]
 
 [project.optional-dependencies]
-dev = ["pytest", "playwright", "imageio-ffmpeg"]
+dev = ["pytest", "playwright", "imageio-ffmpeg", "hypothesis"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

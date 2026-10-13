@@ -45,6 +45,7 @@ def g_on(feature: str) -> bool:
     return google.feature(feature) and (feature == "map_tiles" or google.feature("map_tiles"))
 NEARBY_RADIUS_M = float(APP["nearby"]["search_radius_m"])
 GOOGLE_ROUTE_TTL_S = 300
+DEPARTURE_WINDOW_S = float(APP["departure_window_days"]) * 86400
 DUPLICATE_MERGE_M = float(APP["nearby"]["duplicate_merge_m"])
 ENDPOINT_LANDMARK_M = float(APP["explain"]["endpoint_landmark_m"])
 
@@ -194,9 +195,13 @@ def _parse_departure(depart_at: datetime | None, p: LatLon) -> datetime:
     area = area_for(*p)
     if area is None:
         raise HTTPException(422, f"This location is outside the demo areas: {_area_list()}.")
+    now = datetime.now(timezone.utc)
     if depart_at is None:
-        return datetime.now(timezone.utc).astimezone(area.tz)
-    return depart_at if depart_at.tzinfo else depart_at.replace(tzinfo=area.tz)
+        return now.astimezone(area.tz)
+    when = depart_at if depart_at.tzinfo else depart_at.replace(tzinfo=area.tz)
+    if abs((when - now).total_seconds()) > DEPARTURE_WINDOW_S:
+        raise HTTPException(422, f"Departure time must be within {APP['departure_window_days']} days of today.")
+    return when
 
 
 @app.post("/api/plan")
@@ -420,7 +425,10 @@ def create_report(req: ReportRequest):
     if area is None:
         raise HTTPException(422, f"Reports are only accepted inside the demo areas: {_area_list()}.")
     data = load_area(area.id)
-    node, dist = data.snap((req.lat, req.lon))  # privacy: store the street node, not the exact tap
+    try:
+        node, dist = data.snap((req.lat, req.lon))  # privacy: store the street node, not the exact tap
+    except ValueError as e:
+        raise HTTPException(422, "Reports need to be on or near a street.") from e
     lat, lon = data.node_latlon(node)
     with _reports_lock:
         rows = _load_reports()
