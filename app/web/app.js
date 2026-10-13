@@ -393,7 +393,7 @@ function renderRoutes() {
           </div>
         </div>
       </div>
-      <ul class="rc-reasons">${reasons.map((x) => `<li>${icon("check_circle")}<span>${esc(x)}</span></li>`).join("")}
+      <ul class="rc-reasons"><li>${icon("alt_route")}<span>${esc(backupSummary(r.plan_b))}</span></li>${reasons.map((x) => `<li>${icon("check_circle")}<span>${esc(x)}</span></li>`).join("")}
         ${weak ? `<li class="warn">${icon("warning")}<span>${weak} stretch${weak > 1 ? "es" : ""} with less support (${fmtDist(r.weak_stretches.reduce((a, w) => a + w.length_m, 0))})</span></li>` : ""}
       </ul>
     </button>${sel ? renderDetail(r) : ""}`);
@@ -405,6 +405,7 @@ function renderRoutes() {
     const s = plan.routes[state.selected].stops[Number(b.dataset.stop)];
     flyToPoint(s.lat, s.lon, s.name || s.label);
   }));
+  bindBackup();
   $("#explainBtn")?.addEventListener("click", openExplain);
   $("#view").querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => {
     state.lang = b.dataset.lang; loadExplanation();
@@ -484,6 +485,7 @@ function renderDetail(r) {
       <div><b>${esc(s.name || st.label)}</b><small>${esc(st.label)} · ${fmtDist(s.along_route_m)} along route, ${fmtDist(s.distance_from_route_m)} off · ${status}</small></div></button></li>`;
   }).join("");
   return `<div class="detail">
+    ${renderBackup(r)}
     <h3>Why this score</h3><div class="bars">${bars}</div>
     ${weak ? `<h3>Stretches with less support</h3><ul class="list">${weak}</ul>` : ""}
     ${stops ? `<h3>Stops along this route</h3><ul class="list">${stops}</ul>` : ""}

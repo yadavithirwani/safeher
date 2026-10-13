@@ -1,0 +1,23 @@
+/* Shared controls and standalone viewer: visible focus, readable contrast, touch targets. */
+.sharing-launch { padding: 6px 16px; border-bottom: 1px solid #dadce0; }
+.sharing-launch button, #sharingDialog button, .live-header button {
+  min-height: 44px; padding: 10px 14px; border: 1px solid #5b2a86;
+  border-radius: 8px; color: #5b2a86; background: #fff; cursor: pointer; font: inherit;
+}
+#sharingDialog { max-width: min(460px, calc(100vw - 32px)); }
+#sharingDialog input { box-sizing: border-box; width: 100%; min-height: 44px; margin: 8px 0; }
+#sharingDialog p { line-height: 1.5; }
+.sharing-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#sharingDialog #stopSharing { color: #fff; background: #a12020; border-color: #a12020; }
+.sharing-launch button:focus-visible, #sharingDialog button:focus-visible,
+#sharingDialog input:focus-visible, .live-header button:focus-visible {
+  outline: 3px solid #1769aa; outline-offset: 3px;
+}
+#sharingDialog button:disabled { opacity: .6; cursor: default; }
+.live-page { margin: 0; font: 16px/1.5 system-ui, sans-serif; color: #242424; }
+.live-header { padding: 16px 24px; }
+.live-header h1 { font-size: 22px; margin: 0; }
+.live-header p { margin: 6px 0; }
+.live-header a { color: #a12020; }
+#liveStatus { font-weight: 700; }
+#liveMap { height: 60vh; min-height: 300px; }

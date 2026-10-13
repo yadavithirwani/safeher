@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from . import config, ncrb
+from .backup import BackupCoverage
 from . import signals as sig
 from .areas import Area, area_for
 from .geo import LatLon, haversine_m, interpolate, split_polyline
@@ -241,6 +242,7 @@ def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLo
     ctx = TripContext(data, when, night, weights_at(night), PointIndex(reports))
     reports_key = hash(tuple((p, r.category, r.created_at, r.verification) for p, r in reports))
 
+    backup = BackupCoverage(data, when)
     routes = []
     for label, nodes in candidate_paths(data, origin, dest, edge_support(ctx, reports_key)):
         edges = path_edges(data, nodes)
@@ -250,6 +252,7 @@ def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLo
         highlights, reasons = describe(pieces, ctx.local)
         distance = sum(p.length_m for p in pieces)
         routes.append({
+            "plan_b": backup.describe(edges),
             "label": label,
             "distance_m": round(distance),
             "duration_min": round(round(distance) / WALK_M_PER_MIN),  # from the distance shown

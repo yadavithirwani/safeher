@@ -12,6 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400..600,0..1,0&display=block" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet">
   <link href="/static/styles.css" rel="stylesheet">
+  <link href="/static/sharing.css" rel="stylesheet">
 </head>
 <body>
   <div id="map" role="application" aria-label="Map"></div>
@@ -70,6 +71,9 @@
       </div>
     </section>
 
+    <section class="sharing-launch" aria-label="Live location sharing">
+      <button id="sharingBtn" type="button">Share live location</button>
+    </section>
     <div class="view" id="view" aria-live="polite"></div>
 
     <footer class="disclaimer">
@@ -100,7 +104,23 @@
     <div id="explainBody"></div>
   </dialog>
 
+  <dialog id="sharingDialog" class="dialog" aria-labelledby="sharingTitle">
+    <form method="dialog" class="dialog-head"><h2 id="sharingTitle">Share live location</h2><button aria-label="Close">Close</button></form>
+    <p>Share your precise GPS position and selected route with people you trust. Anyone with the viewer link can see them.</p>
+    <p><strong>Keep this page open.</strong> Updates may pause in the background or when your phone locks. The link expires after two hours. Stopping deletes the stored location; only the latest point is kept.</p>
+    <p id="sharingStatus" role="status">Sharing is off. Start only when you want to share your location.</p>
+    <label for="sharingLink">Private viewer link</label>
+    <input id="sharingLink" readonly hidden>
+    <div class="sharing-actions">
+      <button id="startSharing" type="button">Start sharing</button>
+      <button id="copySharing" type="button" hidden>Copy viewer link</button>
+      <button id="stopSharing" type="button" hidden>Stop sharing</button>
+    </div>
+  </dialog>
+
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js"></script>
+  <script src="/static/backup.js"></script>
   <script src="/static/app.js"></script>
+  <script src="/static/sharing.js"></script>
 </body>
 </html>
