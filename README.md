@@ -17,6 +17,14 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 - Nearest police and washrooms, and how the score is calculated
 - Bengaluru's street lamps on the night map, reporting and SOS
 
+## Updated demo · live location sharing
+
+[![Updated SafeHer demo with live location sharing.](docs/media/safeher-demo-live-sharing-poster.jpg)](docs/media/safeher-demo-live-sharing.mp4)
+
+▶ **[Watch the updated demo](docs/media/safeher-demo-live-sharing.mp4)** — the original walkthrough plus a new live-sharing chapter: opt-in GPS sharing, recipient map, simulated movement, accuracy/update age, foreground limitations, and stopping/revoking the link. The new chapter is labelled **simulated GPS / cached OSM map**. The original video and poster above remain unchanged.
+
+Recording instructions: [demo/README.md](demo/README.md). The new recorder never overwrites either version.
+
 ## MVP features
 1. Map with 2–3 candidate routes
 2. Transparent, rule-based safety score
