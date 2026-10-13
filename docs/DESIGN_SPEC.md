@@ -152,6 +152,15 @@ A dedicated layer and quick-action bar for essential stops **on or near the plan
 - **Accessibility:** WCAG 2.2 AA contrast; 48 dp touch targets; colour never the only signal (icons + labels on scores); screen-reader labels; works one-handed.
 - **Discreet mode:** neutral app name/icon option and quick-exit gesture that switches to a blank map.
 
+### 6.4 Demo web app (implemented: `app/web/`, served by `backend/safeher/api.py`)
+- **Stack:** plain HTML, CSS and JS with no build step (Node isn't needed). **MapLibre GL** with free **CARTO** basemaps: *Voyager* by day, *Dark Matter* when the departure is after sunset. Roboto + Material Symbols. The API serves the page at `/`, so the demo is one command.
+- **Layout (Google Maps pattern):** floating directions panel on the left (bottom sheet on phones ≤ 760 px), category chips across the top (Police, Washrooms, Open now, Hospitals, Pharmacies), Report and SOS buttons bottom-right, theme toggle (auto / dark / light).
+- **Routes on the map:** the selected route is coloured stretch by stretch by score (rose → amber → teal). At night, stretches with *measured* lighting get an amber glow and mapped street lamps show as amber dots. Alternatives are grey and clickable. Time and score bubbles avoid colliding on screen.
+- **Panel:** a comparison line ("Most support takes N min longer and scores X vs Y"), route cards (score ring, band, label, two data-only reasons, weak-stretch count), and for the selected route: per-signal bars with confidence, weak stretches (tap to highlight), stops along the route, **Start in Google Maps** (walking hand-off with 3 waypoints to keep the chosen path), **Copy route link** (state lives in the URL hash) and **How is this calculated?** (live weights for the chosen time, formula, bands, limits).
+- **Departure-time slider (00:00–23:45, 15-min steps):** re-scores as you drag, which shows lighting weight, closing hours and the day/night map switch live. The demo opens at 9:30 PM.
+- **Reporting:** category grid, then tap the map. Anonymous, snapped to the nearest street node, pending (counts half). Routes re-score immediately.
+- **API:** `GET /api/areas`, `/api/meta`, `/api/search`, `/api/nearby`, `/api/layers/{area}`, `/api/reports`; `POST /api/plan`, `/api/reports`. Reports are stored in `backend/var/reports.jsonl` (gitignored; Firestore later).
+
 ## 7. Scoring model
 
 ### 7.1 Approach
@@ -363,7 +372,7 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | **Week 2** | Gemini explain + Q&A; safe stops layer (police, washroom, well-lit); reporting; trip sharing |
 | **Week 3** | Dashboard; privacy hardening; multilingual polish; demo script and video |
 
-> **Revised 4 Oct 2026:** submission is under a week away. Priority order: (1) scoring engine + tests ✅, (2) OSM data cache + routing for Delhi and Bengaluru ✅, (3) safe stops along the route, (4) explanation with guardrail tests, (5) API, (6) frontend. Dashboard, trip sharing and reporting UI only if time allows.
+> **Revised 4 Oct 2026:** submission is under a week away. Priority order: (1) scoring engine + tests ✅, (2) OSM data cache + routing for Delhi and Bengaluru ✅, (3) safe stops along the route, (4) explanation with guardrail tests, (5) API ✅, (6) demo web app ✅. Dashboard, trip sharing and reporting UI only if time allows.
 
 ## 15. Team notes
 - Feature additions from 1 Oct discussion: **nearest police station** (Shreya), **closest washroom** and **well-lit places when planning a trip** — incorporated in §5.5.
@@ -385,3 +394,6 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 7 Oct 2026 | NCRB incidents added for Delhi (15 police districts, public-space heads, 2019/21/22 average, confidence 0.15); Bengaluru stays "no data" (§8.4) | Real, open, citable; honest about being district-level and count-based |
 | 7 Oct 2026 | Lighting source for Delhi (VIIRS) flagged as top data gap | Delhi has ~0% lit tags and no mapped lamps |
 | 7 Oct 2026 | VIIRS VNP46A4 yearly via `blackmarblepy` as lighting fallback at confidence 0.45, below OSM tags and lamps (§8.5) | Measured beats guessed; yearly composite avoids cloud and moon noise; 500 m too coarse to override street-level data |
+| 13 Oct 2026 | Demo frontend is a **web app** (MapLibre + CARTO, no build step) instead of Flutter; Flutter stays the post-hackathon target | Node and Flutter aren't installed, the deadline is days away, a web app runs on any phone and laptop for judges, and trip-share links need a web view anyway |
+| 13 Oct 2026 | Map coloured per ~50 m stretch by score; amber glow only for *measured* lighting | Makes "this stretch is weaker" visible without overstating estimated lighting |
+| 13 Oct 2026 | Hand-off to Google Maps for navigation with waypoints | Spec §3 non-goal (no turn-by-turn); waypoints keep the chosen route |

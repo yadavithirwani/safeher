@@ -6,6 +6,17 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 
 > SafeHer helps you make safer, better-informed decisions. It does not guarantee safety. In an emergency, call **112**.
 
+## Demo
+
+[![SafeHer demo: Hauz Khas Metro to Select Citywalk, Delhi, at 9:30 PM. Click to play the video.](docs/media/demo-poster.jpg)](docs/media/safeher-demo.mp4)
+
+▶️ **[Watch the 2½-minute demo video](docs/media/safeher-demo.mp4)** (MP4, 8.5 MB, captioned). It shows:
+- Night-time route comparison in Delhi: the best-supported route is 1 min longer and scores 77 vs 67
+- Weak stretches, safe stops and the per-signal breakdown
+- Scores changing with time of day (1 PM vs 11:45 PM)
+- Nearest police and washrooms, and how the score is calculated
+- Bengaluru's street lamps on the night map, reporting and SOS
+
 ## MVP features
 1. Map with 2–3 candidate routes
 2. Transparent, rule-based safety score
@@ -16,6 +27,17 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 7. Trusted-contact trip sharing
 8. Aggregated, privacy-preserving hotspot dashboard
 
+## Run the demo
+```bash
+cd backend
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/uvicorn safeher.api:app --port 8765
+```
+Open http://localhost:8765. Map data for both demo areas is already in `data/areas/`; rebuild it with `.venv/bin/python -m safeher.fetch`. Run the tests with `.venv/bin/pytest`.
+
+### Record the demo video
+With the server running: `backend/.venv/bin/python -m playwright install chromium` (once), then `backend/.venv/bin/python demo/record_demo.py` → `demo/out/safeher-demo.mp4` (≈2½ min, captioned). Add `--headed` to watch it record.
+
 ## Docs
 - [Design spec](docs/DESIGN_SPEC.md)
 
@@ -24,7 +46,7 @@ Flutter · Google Maps Platform (Maps SDK, Routes, Places) · Gemini API / Verte
 
 ## Repo layout
 ```
-app/        mobile app (Flutter)
+app/web/    demo web app (MapLibre, served by the API)
 dashboard/  community / authority dashboard (web)
 backend/    Cloud Run API (scoring, Gemini, reports, trips)
 data/       ingestion scripts and pilot-city datasets

@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
-from functools import lru_cache
 
 from . import ncrb
 from . import signals as sig
@@ -103,26 +102,33 @@ def score_pieces(ctx: TripContext, edges: list[Edge]) -> list[PieceInfo]:
     return pieces
 
 
-@lru_cache(maxsize=16)
-def _edge_support_cached(area_id: str, hour_key: str, night: float) -> dict:
-    """Support score per street at a given hour, used only to steer the 'Most support' route search."""
-    data = load_area(area_id)
-    ctx = TripContext(data, datetime.fromisoformat(hour_key), night, weights_at(night))
+_SUPPORT_CACHE: dict[tuple, dict] = {}
+_SUPPORT_CACHE_MAX = 16
+
+
+def edge_support(ctx: TripContext, reports_key: int = 0) -> dict:
+    """Support score per street at the departure hour, used only to steer the 'Most support' search.
+
+    Cached per (area, hour, reports); a new community report invalidates it.
+    """
+    hour = ctx.when.replace(minute=0, second=0, microsecond=0)
+    key = (ctx.data.area.id, hour.isoformat(), round(ctx.night, 1), reports_key)
+    if key in _SUPPORT_CACHE:
+        return _SUPPORT_CACHE[key]
+    hour_ctx = TripContext(ctx.data, hour, ctx.night, ctx.weights, ctx.reports)
     support = {}
-    for u, v, d in data.graph.edges(data=True):
-        key = frozenset((u, v))
-        if key in support:
+    for u, v, d in ctx.data.graph.edges(data=True):
+        k = frozenset((u, v))
+        if k in support:
             continue
         a, b = ctx.data.node_latlon(u), ctx.data.node_latlon(v)
-        readings, _ = readings_at(ctx, interpolate(a, b, 0.5), d)
+        readings, _ = readings_at(hour_ctx, interpolate(a, b, 0.5), d)
         s = score_segment(readings, ctx.weights).score
-        support[key] = 50.0 if s is None else s
+        support[k] = 50.0 if s is None else s
+    if len(_SUPPORT_CACHE) >= _SUPPORT_CACHE_MAX:
+        _SUPPORT_CACHE.pop(next(iter(_SUPPORT_CACHE)))
+    _SUPPORT_CACHE[key] = support
     return support
-
-
-def edge_support(ctx: TripContext) -> dict:
-    hour = ctx.when.replace(minute=0, second=0, microsecond=0)
-    return _edge_support_cached(ctx.data.area.id, hour.isoformat(), round(ctx.night, 1))
 
 
 # --- Describing a route ---------------------------------------------------------------------
@@ -142,7 +148,8 @@ def weak_stretches(pieces: list[PieceInfo]) -> list[dict]:
             main = [SIGNAL_LABELS[k] for k, _ in shortfall.most_common(2) if _ > 0]
             score = sum(p.segment.score * p.length_m for p in run) / length
             out.append({
-                "start": run[0].points[0], "end": run[-1].points[-1], "length_m": round(length),
+                "start": [round(c, 6) for c in run[0].points[0]],
+                "end": [round(c, 6) for c in run[-1].points[-1]], "length_m": round(length),
                 "score": round(score), "main_factors": main,
             })
         run.clear()
@@ -227,9 +234,10 @@ def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLo
     data = load_area(area.id)
     night = night_fraction(when, *area.center)
     ctx = TripContext(data, when, night, weights_at(night), PointIndex(reports))
+    reports_key = hash(tuple((p, r.category, r.created_at, r.verification) for p, r in reports))
 
     routes = []
-    for label, nodes in candidate_paths(data, origin, dest, edge_support(ctx)):
+    for label, nodes in candidate_paths(data, origin, dest, edge_support(ctx, reports_key)):
         edges = path_edges(data, nodes)
         line = [edges[0].points[0]] + [p for e in edges for p in e.points[1:]]
         pieces = score_pieces(ctx, edges)
@@ -253,6 +261,12 @@ def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLo
             "weak_stretches": weak_stretches(pieces),
             "stops": stops_along(data, line, ctx.local),
             "geometry": [[round(a, 6), round(b, 6)] for a, b in line],
+            "pieces": [{"coords": [[round(a, 6), round(b, 6)] for a, b in pc.points],
+                        "score": None if pc.segment.score is None else round(pc.segment.score),
+                        # Lighting shown on the map only when it's measured (tag, lamps or satellite).
+                        "light": (round(pc.segment.readings[sig.LIGHTING].value)
+                                  if pc.segment.readings[sig.LIGHTING].confidence >= 0.45 else None)}
+                       for pc in pieces],
         })
 
     routes.sort(key=lambda r: (r["score"] is None, -(r["score"] or 0)))

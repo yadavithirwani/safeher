@@ -5,8 +5,11 @@ requires-python = ">=3.11"
 dependencies = ["fastapi", "uvicorn[standard]", "httpx", "astral", "osmnx>=2.0", "opening-hours-py", "numpy", "blackmarblepy", "python-dotenv"]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "playwright", "imageio-ffmpeg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.setuptools]
+packages = ["safeher"]

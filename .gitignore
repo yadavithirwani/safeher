@@ -34,3 +34,10 @@ data/raw/
 
 # OSMnx HTTP cache
 backend/cache/
+
+# Local runtime data (community reports in the prototype)
+backend/var/
+*.egg-info/
+
+# Demo recordings
+demo/out/
