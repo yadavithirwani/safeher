@@ -1,6 +1,6 @@
 """Record a captioned walkthrough of the SafeHer demo with Playwright.
 
-Usage (server must be running on :8765):
+Usage (server must be running; --base or SAFEHER_URL, default http://localhost:8765):
     backend/.venv/bin/python demo/record_demo.py            # → demo/out/safeher-demo.mp4
     backend/.venv/bin/python demo/record_demo.py --headed   # watch it while it records
 
@@ -11,6 +11,11 @@ show the real mouse. The script never submits a report, so it leaves no data beh
 from __future__ import annotations
 
 import argparse
+import os
+from dataclasses import dataclass
+from urllib.parse import quote, urlencode
+
+import httpx
 import shutil
 import subprocess
 import time
@@ -18,10 +23,9 @@ from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
 
-BASE = "http://localhost:8765"
+DEFAULT_BASE = os.environ.get("SAFEHER_URL", "http://localhost:8765")
 OUT_DIR = Path(__file__).resolve().parent / "out"
 SIZE = {"width": 1440, "height": 900}
-DELHI = "#area=del-hauz-khas-saket&o=28.54330,77.20670,Hauz%2520Khas%2520Metro&d=28.52860,77.21950,Select%2520Citywalk%252C%2520Saket&t=1290"
 
 OVERLAY_JS = """
 (() => {
@@ -100,7 +104,7 @@ class Demo:
         direction = 1 if to_minutes > current else -1
         values = list(range(current, to_minutes, direction * step)) + [to_minutes]
         for v in values:
-            x = box["x"] + 8 + (box["width"] - 16) * v / 1425
+            x = box["x"] + 8 + (box["width"] - 16) * v / int(slider.get_attribute("max"))
             self.move(x, box["y"] + box["height"] / 2, duration=0.15)
             self.page.evaluate("(v) => { const s = document.querySelector('#timeSlider'); s.value = v;"
                                " s.dispatchEvent(new Event('input', { bubbles: true })); }", v)
@@ -117,17 +121,83 @@ class Demo:
             self.page.wait_for_timeout(35)
 
 
-def run(demo: Demo) -> None:
-    page = demo.page
+def hhmm_to_min(v: str) -> int:
+    h, m = (int(x) for x in v.split(":"))
+    return h * 60 + m
 
-    # 1 — Delhi at night
-    page.goto(f"{BASE}/{DELHI}")
+
+def fmt_clock(minutes: int) -> str:
+    h, m = divmod(minutes, 60)
+    return f"{(h + 11) % 12 + 1}:{m:02d} {'AM' if h < 12 else 'PM'}"
+
+
+@dataclass
+class Story:
+    """Everything the captions say, read from the running API so they always match the app."""
+    base: str
+    area: dict
+    origin: dict
+    dest: dict
+    night_min: int
+    day_min: int
+    late_min: int
+    lamps_area: dict | None
+    lamp_center: tuple[float, float] | None
+    lamp_count: int
+    helplines: list[dict]
+
+    def url(self) -> str:
+        f = lambda p: f"{p['lat']:.5f},{p['lon']:.5f},{quote(p['name'])}"  # noqa: E731
+        return f"{self.base}/#" + urlencode({"area": self.area["id"], "o": f(self.origin), "d": f(self.dest),
+                                             "t": self.night_min})
+
+    def compare(self, minutes: int) -> tuple[dict, dict]:
+        h, m = divmod(minutes, 60)
+        plan = httpx.post(f"{self.base}/api/plan", timeout=60, json={
+            "origin": {"lat": self.origin["lat"], "lon": self.origin["lon"]},
+            "destination": {"lat": self.dest["lat"], "lon": self.dest["lon"]},
+            "depart_at": f"2026-10-13T{h:02d}:{m:02d}:00"}).raise_for_status().json()
+        best = plan["routes"][0]
+        return best, next((r for r in plan["routes"] if r["label"] == "Shortest"), best)
+
+
+def build_story(base: str, night: str | None, day: str, late: str) -> Story:
+    get = lambda path: httpx.get(f"{base}{path}", timeout=60).raise_for_status().json()  # noqa: E731
+    meta, areas = get("/api/meta"), get("/api/areas")
+    area = next(a for a in areas if a["id"] == meta["default_area"])
+    by_name = {lm["name"]: lm for lm in area["landmarks"]}
+    trip = area.get("default_trip") or [lm["name"] for lm in area["landmarks"][:2]]
+    lamps_area, lamp_center, lamp_count = None, None, 0
+    for a in areas:  # the area with the most mapped street lamps gets the night-lamps scene
+        lamps = [f["geometry"]["coordinates"] for f in get(f"/api/layers/{a['id']}")["features"]
+                 if f["properties"]["kind"] == "street_lamp"]
+        if len(lamps) > lamp_count:
+            lons, lats = sorted(c[0] for c in lamps), sorted(c[1] for c in lamps)
+            lamps_area, lamp_center, lamp_count = a, (lats[len(lats) // 2], lons[len(lons) // 2]), len(lamps)
+    night = night or meta["default_departure"] or "21:30"
+    return Story(base, area, by_name[trip[0]], by_name[trip[1]], hhmm_to_min(night), hhmm_to_min(day),
+                 hhmm_to_min(late), lamps_area, lamp_center, lamp_count, meta["helplines"])
+
+
+def run(demo: Demo, story: Story) -> None:
+    page = demo.page
+    best, short = story.compare(story.night_min)
+
+    # 1 — default area at night
+    page.goto(story.url())
     demo.overlay()
     demo.wait_for_plan(extra=3.5)  # let basemap tiles finish
     demo.caption("<b>SafeHer</b> compares walking routes on street lighting, open places, transit and more", 4.5)
-    demo.caption("Hauz Khas Metro → Select Citywalk, Delhi, at <b>9:30 PM</b>", 3.5)
+    demo.caption(f"{story.origin['name']} → {story.dest['name']}, {story.area['city']}, "
+                 f"at <b>{fmt_clock(story.night_min)}</b>", 3.5)
     demo.move(200, 236)
-    demo.caption("The <b>Most support</b> route is 1 minute longer but scores <b>77 vs 67</b>", 4.5)
+    if best is not short:
+        extra = best["duration_min"] - short["duration_min"]
+        longer = f"{extra} minute{'s' if extra != 1 else ''} longer" if extra > 0 else "about as quick"
+        demo.caption(f"The <b>{best['label']}</b> route is {longer} but scores "
+                     f"<b>{best['score']} vs {short['score']}</b>", 4.5)
+    else:
+        demo.caption(f"Here the shortest route also scores highest: <b>{best['score']}</b>", 4.5)
 
     # 2 — why this score
     demo.scroll_panel(330)
@@ -135,21 +205,25 @@ def run(demo: Demo) -> None:
     demo.caption("Every score is explainable: five signals, each with how <b>confident</b> the data is", 5)
     demo.scroll_panel(-330)
 
-    # 3 — weak stretches on the shortest route
-    demo.click(".route-card:has-text('Shortest')", pause=1.5)
-    demo.caption("The shortest route has <b>weaker stretches</b>: little lighting data and few open places", 2)
-    demo.click("[data-weak='0']", pause=0.5)
-    demo.wait(3)
-    demo.click(".route-card >> nth=0", pause=1.5)
+    # 3 — weak stretches on the shortest route (only if it has any)
+    if short["weak_stretches"] and best is not short:
+        demo.click(".route-card:has-text('Shortest')", pause=1.5)
+        demo.caption("The shortest route has <b>weaker stretches</b>. Tap one to see it", 2)
+        demo.click("[data-weak='0']", pause=0.5)
+        demo.wait(3)
+        demo.click(".route-card >> nth=0", pause=1.5)
 
     # 4 — time of day
-    demo.caption("Scores change with the <b>time of day</b>. Drag to 1 PM…", 1.5)
-    demo.slide_time(780)
-    demo.caption("Daytime: lighting matters less and more places are open", 3.5)
-    demo.caption("…and to <b>11:45 PM</b>, when most shops and cafés have closed", 1.5)
-    demo.slide_time(1425)
-    demo.wait(3)
-    demo.slide_time(1290, step=45, delay=0.3)
+    day_best, day_short = story.compare(story.day_min)
+    late_best, late_short = story.compare(story.late_min)
+    demo.caption(f"Scores change with the <b>time of day</b>. Drag to {fmt_clock(story.day_min)}…", 1.5)
+    demo.slide_time(story.day_min)
+    demo.caption(f"Daytime: <b>{day_best['score']} vs {day_short['score']}</b>. "
+                 "Lighting matters less and more places are open", 3.5)
+    demo.caption(f"…and to <b>{fmt_clock(story.late_min)}</b>, when most shops and cafés have closed", 1.5)
+    demo.slide_time(story.late_min)
+    demo.caption(f"Late night: <b>{late_best['score']} vs {late_short['score']}</b>", 3)
+    demo.slide_time(story.night_min, step=45, delay=0.3)
     demo.caption(None)
 
     # 5 — safe stops
@@ -167,13 +241,16 @@ def run(demo: Demo) -> None:
     page.keyboard.press("Escape")
     demo.caption(None, 0.6)
 
-    # 7 — Bengaluru street lamps
-    demo.click("#areaSwitch button[data-id='blr-indiranagar-mg-road']", pause=0.2)
-    demo.caption("In <b>Bengaluru</b>, 589 mapped street lamps glow on the night map", 0)
-    demo.wait_for_plan(extra=3.5)
-    page.evaluate("map.easeTo({ center: [77.6385, 12.9765], zoom: 15.3, duration: 2500 })")
-    demo.wait(4)
-    demo.caption("Lit stretches of the route glow amber, and only where lighting is <b>measured</b>, not guessed", 4.5)
+    # 7 — street lamps (in whichever area has them mapped)
+    if story.lamps_area:
+        if story.lamps_area["id"] != story.area["id"]:
+            demo.click(f"#areaSwitch button[data-id='{story.lamps_area['id']}']", pause=0.2)
+        demo.caption(f"In <b>{story.lamps_area['city']}</b>, {story.lamp_count} mapped street lamps glow on the night map", 0)
+        demo.wait_for_plan(extra=3.5)
+        lat, lon = story.lamp_center
+        page.evaluate(f"map.easeTo({{ center: [{lon}, {lat}], zoom: 15.3, duration: 2500 }})")
+        demo.wait(4)
+        demo.caption("Lit stretches of the route glow amber, and only where lighting is <b>measured</b>, not guessed", 4.5)
 
     # 8 — reporting (not submitted)
     demo.click("#reportBtn", pause=0.5)
@@ -184,7 +261,8 @@ def run(demo: Demo) -> None:
 
     # 9 — SOS
     demo.click("#sosBtn", pause=0.5)
-    demo.caption("Emergency numbers are always one tap away: <b>112</b>, 181, 1091", 3.5)
+    numbers = ", ".join(h["number"] for h in story.helplines[1:])
+    demo.caption(f"Emergency numbers are always one tap away: <b>{story.helplines[0]['number']}</b>, {numbers}", 3.5)
     page.keyboard.press("Escape")
     demo.caption("<b>SafeHer</b>: safer decisions, not guarantees. Built on open data for the Google AI Builder Cup", 5)
 
@@ -204,7 +282,12 @@ def to_mp4(webm: Path) -> Path | None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--base", default=DEFAULT_BASE, help="SafeHer server URL (env SAFEHER_URL)")
+    ap.add_argument("--night", help="night departure HH:MM (default: config/app.json default_departure)")
+    ap.add_argument("--day", default="13:00", help="daytime departure for the time-of-day scene")
+    ap.add_argument("--late", default="23:45", help="late-night departure for the time-of-day scene")
     args = ap.parse_args()
+    story = build_story(args.base.rstrip("/"), args.night, args.day, args.late)
     OUT_DIR.mkdir(exist_ok=True)
     tmp = OUT_DIR / "_raw"
     shutil.rmtree(tmp, ignore_errors=True)
@@ -213,13 +296,13 @@ def main() -> None:
         browser = p.chromium.launch(headless=not args.headed,
                                     args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
         ctx = browser.new_context(viewport=SIZE, device_scale_factor=1, record_video_dir=str(tmp),
-                                  record_video_size=SIZE, timezone_id="Asia/Kolkata", locale="en-IN")
+                                  record_video_size=SIZE, timezone_id=story.area["timezone"], locale="en-IN")
         page = ctx.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         started = time.time()
         try:
-            run(Demo(page))
+            run(Demo(page), story)
         finally:
             video = page.video
             ctx.close()

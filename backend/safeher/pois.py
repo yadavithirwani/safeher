@@ -11,25 +11,25 @@ from typing import Generic, Iterable, TypeVar
 
 import opening_hours
 
+from . import config
 from .geo import LatLon, haversine_m
 
-# Kinds that count as "safe spaces" when open (spec §7.2), and what they're shown as.
-SAFE_SPACE_KINDS = {
-    "police", "hospital", "clinic", "pharmacy", "fuel", "convenience", "supermarket", "mall",
-    "cafe", "restaurant",
-}
+# Kinds that count as "safe spaces" when open, and typical hours for places without opening_hours
+# (only ~5-15% of places in the pilot areas have them). Both come from config/scoring.json; places
+# using typical hours are flagged `hours_assumed` and shown as such in the UI.
+SAFE_SPACE_KINDS = set(config.scoring()["safe_spaces"]["kinds"])
 TRANSIT_KINDS = {"bus_stop", "metro", "rail"}
 STOP_KINDS = {"police", "toilets", "hospital", "pharmacy"}  # quick-action "safe stops" (§5.5)
 
-# OSM has opening_hours for only ~5-15% of places in the pilot areas, so unknown hours fall back
-# to typical hours for the kind. These are flagged `hours_assumed` and shown as such in the UI.
-TYPICAL_HOURS: dict[str, tuple[time, time] | None] = {  # None = assume 24/7
-    "police": None, "hospital": None, "metro": (time(5, 30), time(23, 30)),
-    "fuel": (time(6), time(23)), "pharmacy": (time(9), time(22)), "clinic": (time(9), time(20)),
-    "convenience": (time(8), time(22)), "supermarket": (time(9), time(22)), "mall": (time(10), time(22)),
-    "cafe": (time(11), time(23)), "restaurant": (time(11), time(23)),
-    "toilets": (time(6), time(22)), "bus_stop": (time(5), time(23)), "rail": (time(4), time(23, 59)),
-}
+
+def _typical_hours() -> tuple[dict[str, tuple[time, time] | None], tuple[time, time]]:
+    raw = {k: v for k, v in config.scoring()["typical_hours"].items() if not k.startswith("_comment")}
+    default = raw.pop("_default")
+    parse = lambda v: None if v is None else (config.hhmm(v[0]), config.hhmm(v[1]))  # noqa: E731
+    return {k: parse(v) for k, v in raw.items()}, parse(default)
+
+
+TYPICAL_HOURS, DEFAULT_HOURS = _typical_hours()
 
 
 def classify(tags: dict) -> str | None:
@@ -91,7 +91,7 @@ class Poi:
                 return parsed.is_open(naive), False
             except Exception:
                 pass
-        hours = TYPICAL_HOURS.get(self.kind, (time(9), time(21)))
+        hours = TYPICAL_HOURS.get(self.kind, DEFAULT_HOURS)
         if hours is None:
             return True, True
         start, end = hours

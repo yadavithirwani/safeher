@@ -14,38 +14,29 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import signals as sig
-from .areas import AREAS, REPO_ROOT, area_for
+from . import config
+from .areas import AREAS, area_for
+from .config import REPO_ROOT
 from .geo import LatLon, haversine_m
 from .explain import LANGUAGES, explain
 from .plan import DISCLAIMER, KIND_LABELS, plan
 from .pois import SAFE_SPACE_KINDS
 from .routing import load_area
+from .search import search as place_search
 from .scoring import BANDS, DAY_WEIGHTS, NIGHT_WEIGHTS, WEIGHTS_VERSION
 
 WEB_DIR = REPO_ROOT / "app" / "web"
 REPORTS_FILE = Path(__file__).resolve().parents[1] / "var" / "reports.jsonl"
 
-HELPLINES = [
-    {"number": "112", "label": "Emergency (police, fire, ambulance)"},
-    {"number": "181", "label": "Women Helpline"},
-    {"number": "1091", "label": "Women in Distress (police)"},
-]
+APP = config.app()
+NEARBY_RADIUS_M = float(APP["nearby"]["search_radius_m"])
+DUPLICATE_MERGE_M = float(APP["nearby"]["duplicate_merge_m"])
+ENDPOINT_LANDMARK_M = float(APP["explain"]["endpoint_landmark_m"])
 
-# Named starting points for the demo, so the presenter never has to type an exact address.
-LANDMARKS = {
-    "blr-indiranagar-mg-road": [
-        ("Indiranagar Metro", 12.9784, 77.6408), ("MG Road Metro", 12.9756, 77.6067),
-        ("Trinity Metro", 12.9729, 77.6170), ("Halasuru Metro", 12.9762, 77.6267),
-        ("100 Feet Road, Indiranagar", 12.9719, 77.6412), ("Brigade Road", 12.9719, 77.6074),
-        ("Cubbon Park", 12.9763, 77.6033),
-    ],
-    "del-hauz-khas-saket": [
-        ("Hauz Khas Metro", 28.5433, 77.2067), ("Select Citywalk, Saket", 28.5286, 77.2195),
-        ("Hauz Khas Village", 28.5535, 77.1946), ("Malviya Nagar Metro", 28.5283, 77.2054),
-        ("Green Park", 28.5530, 77.2068), ("Saket Metro", 28.5206, 77.2015),
-        ("Panchsheel Park", 28.5418, 77.2183),
-    ],
-}
+
+def _area_list() -> str:
+    return ", ".join(f"{a.name} ({a.city})" for a in AREAS.values())
+
 
 app = FastAPI(title="SafeHer API", version="0.1.0")
 
@@ -109,7 +100,8 @@ def areas():
     return [
         {"id": a.id, "city": a.city, "name": a.name, "center": a.center,
          "bbox": [a.west, a.south, a.east, a.north],
-         "landmarks": [{"name": n, "lat": la, "lon": lo} for n, la, lo in LANDMARKS.get(a.id, [])]}
+         "timezone": a.timezone, "default_trip": a.default_trip,
+         "landmarks": [{"name": lm.name, "lat": lm.lat, "lon": lm.lon} for lm in a.landmarks]}
         for a in AREAS.values()
     ]
 
@@ -122,38 +114,34 @@ def meta():
         "day_weights": DAY_WEIGHTS,
         "bands": [{"min": m, "label": label} for m, label in BANDS],
         "report_categories": list(sig.REPORT_SEVERITY),
-        "helplines": HELPLINES,
+        "helplines": APP["helplines"],
+        "default_area": APP["default_area"] if APP["default_area"] in AREAS else next(iter(AREAS)),
+        "default_departure": APP["default_departure"],
+        "basemaps": APP["basemaps"],
+        "nearby_radius_m": NEARBY_RADIUS_M,
+        "languages": APP["languages"],
         "disclaimer": DISCLAIMER,
     }
 
 
 @app.get("/api/search")
-def search(q: str = Query(min_length=1, max_length=80), area: str | None = None, limit: int = 8):
-    ql = q.strip().lower()
-    results: list[tuple[int, dict]] = []
-    for a in AREAS.values():
-        if area and a.id != area:
-            continue
-        for name, lat, lon in LANDMARKS.get(a.id, []):
-            if ql in name.lower():
-                results.append((0 if name.lower().startswith(ql) else 1,
-                                {"name": name, "detail": f"{a.city} · landmark", "lat": lat, "lon": lon}))
-        data = load_area(a.id)
-        seen = set()
-        for p in data.pois:
-            if p.name and ql in p.name.lower() and p.name not in seen:
-                seen.add(p.name)
-                results.append((2 if p.name.lower().startswith(ql) else 3,
-                                {"name": p.name, "detail": f"{a.city} · {KIND_LABELS.get(p.kind, p.kind)}",
-                                 "lat": p.lat, "lon": p.lon}))
-    results.sort(key=lambda x: (x[0], len(x[1]["name"])))
-    return [r for _, r in results[:limit]]
+def search(q: str = Query(min_length=1, max_length=80), area: str | None = None,
+           limit: int = APP["search"]["default_limit"]):
+    """Places, streets and landmarks. With `area`, searches it first; if nothing matches there,
+    results from the other demo areas come back flagged `other_area` so the app can offer a switch."""
+    if area and area not in AREAS:
+        raise HTTPException(404, "unknown area")
+    first = [area] if area else list(AREAS)
+    results = place_search(q, first, limit)
+    if not results and area:
+        results = [{**r, "other_area": True} for r in place_search(q, [a for a in AREAS if a != area], limit)]
+    return results
 
 
 def _parse_departure(depart_at: datetime | None, p: LatLon) -> datetime:
     area = area_for(*p)
     if area is None:
-        raise HTTPException(422, "This location is outside the demo areas (Indiranagar–MG Road, Hauz Khas–Saket).")
+        raise HTTPException(422, f"This location is outside the demo areas: {_area_list()}.")
     if depart_at is None:
         return datetime.now(timezone.utc).astimezone(area.tz)
     return depart_at if depart_at.tzinfo else depart_at.replace(tzinfo=area.tz)
@@ -176,7 +164,7 @@ def _area_place_names(area_id: str) -> set[str]:
     """Every named place in the area: an explanation may only name the ones in its own facts."""
     if area_id not in _place_names:
         names = {p.name for p in load_area(area_id).pois if p.name}
-        names |= {n for n, _, _ in LANDMARKS.get(area_id, [])}
+        names |= {lm.name for lm in AREAS[area_id].landmarks}
         _place_names[area_id] = names
     return _place_names[area_id]
 
@@ -191,8 +179,8 @@ def explain_trip(req: ExplainRequest):
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     # Landmarks at the start or end of the trip may be named; any other place not in the facts may not.
-    at_endpoints = {n for n, lat, lon in LANDMARKS.get(p["area"]["id"], [])
-                    if min(haversine_m((lat, lon), o), haversine_m((lat, lon), d)) < 150}
+    at_endpoints = {lm.name for lm in AREAS[p["area"]["id"]].landmarks
+                    if min(haversine_m((lm.lat, lm.lon), o), haversine_m((lm.lat, lm.lon), d)) < ENDPOINT_LANDMARK_M}
     result = explain(p, req.lang, forbidden_names=_area_place_names(p["area"]["id"]) - at_endpoints)
     return {k: result[k] for k in ("text", "provider", "model", "lang", "checked")}
 
@@ -201,22 +189,24 @@ NearbyKind = Literal["police", "toilets", "hospital", "pharmacy", "open_places"]
 
 
 @app.get("/api/nearby")
-def nearby(lat: float, lon: float, kind: NearbyKind, depart_at: datetime | None = None, limit: int = 5):
+def nearby(lat: float, lon: float, kind: NearbyKind, depart_at: datetime | None = None,
+           limit: int = APP["nearby"]["default_limit"]):
     when = _parse_departure(depart_at, (lat, lon))
     data = load_area(area_for(lat, lon).id)
     local = when.astimezone(data.area.tz)
     index = data.safe_spaces if kind == "open_places" else data.stops
     out = []
-    for dist, poi in index.within((lat, lon), 2500):
+    for dist, poi in index.within((lat, lon), NEARBY_RADIUS_M):
         if kind != "open_places" and poi.kind != kind:
             continue
         is_open, assumed = poi.is_open(local)
         if kind == "open_places" and not is_open:
             continue
         # OSM often maps one place twice (a point and a building outline): keep the nearer one.
-        if poi.name and any(o["name"] == poi.name and haversine_m((o["lat"], o["lon"]), poi.latlon) < 150 for o in out):
+        if poi.name and any(o["name"] == poi.name and haversine_m((o["lat"], o["lon"]), poi.latlon) < DUPLICATE_MERGE_M
+                            for o in out):
             continue
-        lamps = len(data.lamps.within(poi.latlon, 30))
+        lamps = len(data.lamps.within(poi.latlon, sig.LAMP_RADIUS_M))
         out.append({"name": poi.name or KIND_LABELS.get(poi.kind, poi.kind).capitalize(),
                     "kind": poi.kind, "label": KIND_LABELS.get(poi.kind, poi.kind),
                     "lat": poi.lat, "lon": poi.lon, "distance_m": round(dist),
@@ -254,7 +244,7 @@ def list_reports(area: str | None = None):
 def create_report(req: ReportRequest):
     area = area_for(req.lat, req.lon)
     if area is None:
-        raise HTTPException(422, "Reports are only accepted inside the demo areas.")
+        raise HTTPException(422, f"Reports are only accepted inside the demo areas: {_area_list()}.")
     data = load_area(area.id)
     node, dist = data.snap((req.lat, req.lon))  # privacy: store the street node, not the exact tap
     lat, lon = data.node_latlon(node)

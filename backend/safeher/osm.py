@@ -7,18 +7,22 @@ API only ever reads from the cache. Run `python -m safeher.fetch <area-id>` to (
 from __future__ import annotations
 
 import json
+import os
 import time
 
 import httpx
 
 from .areas import Area
 
-OVERPASS_MIRRORS = (
+DEFAULT_OVERPASS_MIRRORS = (
     "https://overpass-api.de/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
 )
+# OVERPASS_URLS="https://a/api/interpreter,https://b/api/interpreter" overrides the mirror list.
+OVERPASS_MIRRORS = tuple(u.strip() for u in os.environ.get("OVERPASS_URLS", "").split(",") if u.strip()) \
+    or DEFAULT_OVERPASS_MIRRORS
 USER_AGENT = "SafeHer/0.1 (hackathon prototype; github.com/yadavithirwani/safeher)"
 
 # Everything the scoring needs besides the street graph: safe spaces, washrooms, transit, lamps.

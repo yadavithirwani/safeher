@@ -220,3 +220,23 @@ def test_split_polyline_preserves_length():
     assert sum(polyline_length_m(p) for p in pieces) == pytest.approx(polyline_length_m(line), rel=1e-6)
     assert all(polyline_length_m(p) <= 50 * 1.5 for p in pieces)
     assert pieces[0][0] == line[0] and pieces[-1][-1] == line[-1]
+
+
+# --- monotonicity: found by random end-to-end testing -------------------------------------
+
+
+def test_reports_never_move_a_score_the_wrong_way():
+    """A negative report can only lower a stretch's score; a positive one can only raise it."""
+    import random
+
+    rng = random.Random(7)
+    for _ in range(5000):
+        w = weights_at(rng.random())
+        base = {k: Reading(rng.uniform(0, 100), rng.choice([0.0, 0.3, 0.45, 0.7, 0.9])) for k in SIGNALS}
+        existing = [sig.Report(rng.choice(list(sig.REPORT_SEVERITY)), NOW - timedelta(days=rng.uniform(0, 29)),
+                               rng.choice(["pending", "corroborated"])) for _ in range(rng.randint(0, 3))]
+        before = score_segment({**base, sig.REPORTS: sig.reports(existing, NOW)}, w).score
+        neg = score_segment({**base, sig.REPORTS: sig.reports(existing + [sig.Report("harassment", NOW)], NOW)}, w).score
+        pos = score_segment({**base, sig.REPORTS: sig.reports(existing + [sig.Report("positive", NOW)], NOW)}, w).score
+        if before is not None:
+            assert neg <= before + 1e-9 and pos >= before - 1e-9

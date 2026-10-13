@@ -1,7 +1,8 @@
-"""Rule-based, transparent route scoring (design spec §7).
+"""Rule-based, transparent route scoring (design spec §7). Parameters: config/scoring.json.
 
 segment_score = Σ effective_weight_i × signal_i      (weights renormalised by confidence)
-route_score   = 0.8 × length_weighted_mean(segment_score) + 0.2 × length_weighted_p10(segment_score)
+route_score   = mean_share × length_weighted_mean(segment_score)
+              + worst_share × length_weighted_percentile(segment_score, worst_percentile)
 """
 
 from __future__ import annotations
@@ -12,19 +13,25 @@ from datetime import datetime, timedelta
 from astral import LocationInfo
 from astral.sun import sun
 
-from .signals import INCIDENTS, LIGHTING, REPORTS, SAFE_SPACES, SIGNALS, TRANSIT, Reading
+from . import config
+from .signals import SIGNALS, Reading
 
-WEIGHTS_VERSION = "2026-10-04.1"
+_C = config.scoring()
+WEIGHTS_VERSION = _C["version"]
 
-NIGHT_WEIGHTS = {LIGHTING: 0.30, TRANSIT: 0.15, SAFE_SPACES: 0.25, INCIDENTS: 0.15, REPORTS: 0.15}
-DAY_WEIGHTS = {LIGHTING: 0.05, TRANSIT: 0.20, SAFE_SPACES: 0.30, INCIDENTS: 0.20, REPORTS: 0.25}
+NIGHT_WEIGHTS = {k: float(_C["weights"]["night"][k]) for k in SIGNALS}
+DAY_WEIGHTS = {k: float(_C["weights"]["day"][k]) for k in SIGNALS}
+for _name, _w in (("night", NIGHT_WEIGHTS), ("day", DAY_WEIGHTS)):
+    if abs(sum(_w.values()) - 1) > 1e-6:
+        raise RuntimeError(f"config/scoring.json: {_name} weights must sum to 1, got {sum(_w.values())}")
 
-TRANSITION = timedelta(minutes=30)  # weights blend over 30 min centred on sunrise / sunset
-MEAN_SHARE, WORST_SHARE = 0.8, 0.2
-WORST_PERCENTILE = 0.10
-MIN_CONFIDENCE_MASS = 0.15  # below this, a segment is "insufficient data" rather than scored
+TRANSITION = timedelta(minutes=_C["weights"]["transition_minutes"])  # blend centred on sunrise / sunset
+MEAN_SHARE, WORST_SHARE = float(_C["route"]["mean_share"]), float(_C["route"]["worst_share"])
+WORST_PERCENTILE = float(_C["route"]["worst_percentile"])
+MIN_CONFIDENCE_MASS = float(_C["route"]["min_confidence_mass"])  # below this a segment is unscored
+MIN_COVERAGE = float(_C["route"]["min_coverage"])  # below this share of length a route is unscored
 
-BANDS = ((75, "More support"), (50, "Mixed"), (0, "Less support"))
+BANDS = tuple(sorted(((b["min"], b["label"]) for b in _C["bands"]), reverse=True))
 
 
 def band(score: float) -> str:
@@ -127,7 +134,7 @@ def score_route(segments: list[tuple[float, SegmentScore]], weights: dict[str, f
         signal_conf[k] = sum(length * s.readings[k].confidence for length, s in segments) / total_len
 
     coverage = scored_len / total_len
-    if not scored or coverage < 0.5:
+    if not scored or coverage < MIN_COVERAGE:
         return RouteScore(None, None, None, None, signal_means, signal_conf, coverage, weights,
                           segments=[s for _, s in segments])
 

@@ -116,6 +116,8 @@ button { cursor: pointer; }
 .suggest li { display: flex; gap: 12px; align-items: center; padding: 8px 14px; cursor: pointer; }
 .suggest li[aria-selected="true"], .suggest li:hover { background: var(--surface-2); }
 .suggest .msr { color: var(--text-2); }
+.suggest .suggest-empty { cursor: default; align-items: flex-start; }
+.suggest .suggest-empty:hover { background: transparent; }
 .suggest b { display: block; font-weight: 500; font-size: 14px; }
 .suggest small { color: var(--text-2); font-size: 12.5px; }
 

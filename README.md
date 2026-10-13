@@ -10,8 +10,8 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 
 [![SafeHer demo: Hauz Khas Metro to Select Citywalk, Delhi, at 9:30 PM. Click to play the video.](docs/media/demo-poster.jpg)](docs/media/safeher-demo.mp4)
 
-▶️ **[Watch the 2½-minute demo video](docs/media/safeher-demo.mp4)** (MP4, 8.5 MB, captioned). It shows:
-- Night-time route comparison in Delhi: the best-supported route is 1 min longer and scores 77 vs 67
+▶️ **[Watch the 2½-minute demo video](docs/media/safeher-demo.mp4)** (MP4, 8.7 MB, captioned). It shows:
+- Night-time route comparison in Delhi: the best-supported route is slightly longer and scores higher than the shortest
 - Weak stretches, safe stops and the per-signal breakdown
 - Scores changing with time of day (1 PM vs 11:45 PM)
 - Nearest police and washrooms, and how the score is calculated
@@ -34,6 +34,8 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/uvicorn safeher.api:app --port 8765
 ```
 Open http://localhost:8765.
+
+Settings live in `config/`: demo areas and landmarks (`areas.json`), the published scoring model (`scoring.json`) and app defaults such as the opening time and helplines (`app.json`). Add an area by adding an entry to `areas.json` and running `.venv/bin/python -m safeher.fetch <area-id>`.
 
 Route explanations use **Gemini** when `GEMINI_API_KEY=...` is set in `backend/.env` (free key from [Google AI Studio](https://aistudio.google.com/apikey); never commit it). Without a key, a fact-checked template is used. Map data for both demo areas is already in `data/areas/`; rebuild it with `.venv/bin/python -m safeher.fetch`. Run the tests with `.venv/bin/pytest`.
 

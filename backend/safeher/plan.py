@@ -6,25 +6,30 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from . import ncrb
+from . import config, ncrb
 from . import signals as sig
 from .areas import Area, area_for
 from .geo import LatLon, haversine_m, interpolate, split_polyline
 from .pois import Poi, PointIndex
 from .routing import AreaData, Edge, candidate_paths, load_area, path_edges
-from .scoring import WEIGHTS_VERSION, SegmentScore, night_fraction, score_route, score_segment, weights_at
+from .scoring import WEIGHTS_VERSION, SegmentScore, band, night_fraction, score_route, score_segment, weights_at
 
-WALK_M_PER_MIN = 80.0  # ≈4.8 km/h
-SEGMENT_M = 50.0
-SAFE_SPACE_RADIUS_M = 150.0
-TRANSIT_SEARCH_M = 800.0
-LAMP_RADIUS_M = 25.0
-REPORT_RADIUS_M = 50.0
-STOP_SEARCH_M = 300.0
-WEAK_SCORE = 50.0
-WEAK_MIN_M = 100.0
+_C = config.scoring()
+_R, _REASONS, _LIGHT = _C["routing"], _C["reasons"], _C["lighting"]
+WALK_M_PER_MIN = float(_R["walk_m_per_min"])
+SEGMENT_M = float(_R["segment_m"])
+STOP_SEARCH_M = float(_R["stop_search_m"])
+STOP_SAMPLE_M = float(_R["stop_sample_m"])
+WEAK_SCORE = float(_R["weak_stretch_score_below"])
+WEAK_MIN_M = float(_R["weak_stretch_min_m"])
+UNSCORED_STREET_SUPPORT = float(_R["unscored_street_support"])
+# Lighting counts as "mapped" from lamp-level evidence up, and as "measured" (shown on the map)
+# from satellite-level evidence up; both thresholds follow the lighting confidences in config.
+MAPPED_LIGHT_CONFIDENCE = float(_LIGHT["lamp_confidence"])
+MEASURED_LIGHT_CONFIDENCE = float(_LIGHT["viirs_confidence"])
+TRANSIT_FULL_M = float(_C["transit"]["full_score_within_m"])
 
-DISCLAIMER = "Scores reflect available data and can't guarantee safety. In an emergency call 112."
+DISCLAIMER = config.app()["disclaimer"]
 SIGNAL_LABELS = {
     sig.LIGHTING: "street lighting",
     sig.TRANSIT: "transit nearby",
@@ -68,19 +73,19 @@ class PieceInfo:
 
 def readings_at(ctx: TripContext, p: LatLon, tags: dict | None) -> tuple[dict[str, sig.Reading], list[Poi]]:
     local = ctx.local
-    lamps = len(ctx.data.lamps.within(p, LAMP_RADIUS_M))
+    lamps = len(ctx.data.lamps.within(p, sig.LAMP_RADIUS_M))
     viirs = ctx.data.viirs.percentile_at(*p) if ctx.data.viirs is not None else None
     lighting = sig.lighting(tags, lamps, night=ctx.night >= 0.5, viirs_percentile=viirs)
 
     nearest_stop = None
-    for d, stop in ctx.data.transit.within(p, TRANSIT_SEARCH_M):
+    for d, stop in ctx.data.transit.within(p, sig.TRANSIT_SEARCH_M):
         if stop.is_open(local)[0]:
             nearest_stop = d
             break
 
-    open_places = [poi for _, poi in ctx.data.safe_spaces.within(p, SAFE_SPACE_RADIUS_M) if poi.is_open(local)[0]]
+    open_places = [poi for _, poi in ctx.data.safe_spaces.within(p, sig.SAFE_SPACE_RADIUS_M) if poi.is_open(local)[0]]
 
-    nearby_reports = [r for _, r in ctx.reports.within(p, REPORT_RADIUS_M)]
+    nearby_reports = [r for _, r in ctx.reports.within(p, sig.REPORT_RADIUS_M)]
     readings = {
         sig.LIGHTING: lighting,
         sig.TRANSIT: sig.transit(nearest_stop),
@@ -124,7 +129,7 @@ def edge_support(ctx: TripContext, reports_key: int = 0) -> dict:
         a, b = ctx.data.node_latlon(u), ctx.data.node_latlon(v)
         readings, _ = readings_at(hour_ctx, interpolate(a, b, 0.5), d)
         s = score_segment(readings, ctx.weights).score
-        support[k] = 50.0 if s is None else s
+        support[k] = UNSCORED_STREET_SUPPORT if s is None else s
     if len(_SUPPORT_CACHE) >= _SUPPORT_CACHE_MAX:
         _SUPPORT_CACHE.pop(next(iter(_SUPPORT_CACHE)))
     _SUPPORT_CACHE[key] = support
@@ -155,7 +160,7 @@ def weak_stretches(pieces: list[PieceInfo]) -> list[dict]:
         run.clear()
 
     for p in pieces:
-        if p.segment.score is not None and p.segment.score < WEAK_SCORE:
+        if p.segment.score is not None and round(p.segment.score) < WEAK_SCORE:
             run.append(p)
         else:
             flush()
@@ -167,7 +172,7 @@ def stops_along(data: AreaData, line: list[LatLon], local: datetime) -> list[dic
     """Nearest police / washroom / hospital / pharmacy to the route, with where along it they are."""
     best: dict[str, dict] = {}
     along = 0.0
-    samples = [p for piece in split_polyline(line, 25.0) for p in piece[:1]] + [line[-1]]
+    samples = [p for piece in split_polyline(line, STOP_SAMPLE_M) for p in piece[:1]] + [line[-1]]
     for i, p in enumerate(samples):
         if i:
             along += haversine_m(samples[i - 1], p)
@@ -187,10 +192,10 @@ def stops_along(data: AreaData, line: list[LatLon], local: datetime) -> list[dic
 def describe(pieces: list[PieceInfo], local: datetime) -> tuple[dict, list[str]]:
     total = sum(p.length_m for p in pieces)
     confident_lit = sum(p.length_m for p in pieces
-                        if p.segment.readings[sig.LIGHTING].confidence >= 0.7
-                        and p.segment.readings[sig.LIGHTING].value >= 70)
-    estimated = sum(p.length_m for p in pieces if 0 < p.segment.readings[sig.LIGHTING].confidence < 0.7)
-    near_transit = sum(p.length_m for p in pieces if p.segment.readings[sig.TRANSIT].value >= 99)
+                        if p.segment.readings[sig.LIGHTING].confidence >= MAPPED_LIGHT_CONFIDENCE
+                        and p.segment.readings[sig.LIGHTING].value >= _REASONS["lit_value_at_least"])
+    estimated = sum(p.length_m for p in pieces if 0 < p.segment.readings[sig.LIGHTING].confidence < MAPPED_LIGHT_CONFIDENCE)
+    near_transit = sum(p.length_m for p in pieces if p.segment.readings[sig.TRANSIT].value >= 100)
     places: dict[str, Poi] = {poi.osm: poi for p in pieces for poi in p.open_places}
     open_kinds = Counter(poi.kind for poi in places.values())
     assumed = sum(1 for poi in places.values() if poi.is_open(local)[1])
@@ -204,15 +209,15 @@ def describe(pieces: list[PieceInfo], local: datetime) -> tuple[dict, list[str]]
     }
 
     reasons = []
-    if highlights["lit_confirmed_share"] >= 0.3:
+    if highlights["lit_confirmed_share"] >= _REASONS["lit_min_share"]:
         reasons.append(f"Mapped as lit for {highlights['lit_confirmed_share']:.0%} of the way")
     n_places = sum(open_kinds.values())
     if n_places:
         top = ", ".join(f"{n} {KIND_LABELS.get(k, k)}{'s' if n > 1 else ''}" for k, n in open_kinds.most_common(2))
         reasons.append(f"Passes {n_places} places likely open now ({top})")
-    if highlights["near_transit_share"] >= 0.3:
-        reasons.append(f"Within 150 m of a bus or metro stop for {highlights['near_transit_share']:.0%} of the way")
-    if highlights["lighting_estimated_share"] >= 0.5:
+    if highlights["near_transit_share"] >= _REASONS["near_transit_min_share"]:
+        reasons.append(f"Within {TRANSIT_FULL_M:.0f} m of a bus or metro stop for {highlights['near_transit_share']:.0%} of the way")
+    if highlights["lighting_estimated_share"] >= _REASONS["estimated_lighting_note_share"]:
         reasons.append("Street-light data is limited on most of this route; lighting is estimated from satellite or road type")
     return highlights, reasons
 
@@ -247,9 +252,9 @@ def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLo
         routes.append({
             "label": label,
             "distance_m": round(distance),
-            "duration_min": round(distance / WALK_M_PER_MIN),
+            "duration_min": round(round(distance) / WALK_M_PER_MIN),  # from the distance shown
             "score": None if rs.score is None else round(rs.score),
-            "band": rs.band or "Limited data",
+            "band": "Limited data" if rs.score is None else band(round(rs.score)),
             "coverage": round(rs.coverage, 3),
             "breakdown": [
                 {"signal": k, "label": SIGNAL_LABELS[k], "value": None if v is None else round(v),
@@ -265,7 +270,7 @@ def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLo
                         "score": None if pc.segment.score is None else round(pc.segment.score),
                         # Lighting shown on the map only when it's measured (tag, lamps or satellite).
                         "light": (round(pc.segment.readings[sig.LIGHTING].value)
-                                  if pc.segment.readings[sig.LIGHTING].confidence >= 0.45 else None)}
+                                  if pc.segment.readings[sig.LIGHTING].confidence >= MEASURED_LIGHT_CONFIDENCE else None)}
                        for pc in pieces],
         })
 

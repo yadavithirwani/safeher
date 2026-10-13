@@ -23,7 +23,7 @@ def make_area(bottom_lat: float = 12.9688) -> AreaData:
             g.add_edge(a, b, length=length, lit=lit, highway="residential")
     empty: PointIndex[Poi] = PointIndex(())
     return AreaData(
-        area=Area("test", "Test", "Test", 12.9, 77.5, 13.0, 77.7),
+        area=Area("test", "Test", "Test", 12.9, 77.5, 13.0, 77.7, timezone="UTC"),
         graph=g, nodes=PointIndex((p, n) for n, p in coords.items()),
         pois=[], lamps=empty, transit=empty, safe_spaces=empty, stops=empty,
     )

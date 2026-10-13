@@ -21,10 +21,12 @@ from pathlib import Path
 
 import httpx
 
+from . import config
+
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
-LANGUAGES = {"en": "English", "hi": "Hindi"}
+LANGUAGES = {k: v["name"] for k, v in config.app()["languages"].items()}
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-OLLAMA_URL = "http://localhost:11434/api/generate"
+DEFAULT_OLLAMA_URL = "http://localhost:11434/api/generate"
 
 
 def _env(name: str, default: str = "") -> str:
@@ -215,7 +217,7 @@ def gemini_generate(system: str, user: str, timeout: float = 20.0) -> tuple[str,
 def ollama_generate(system: str, user: str, timeout: float = 60.0) -> tuple[str, str]:
     model = _env("OLLAMA_MODEL", "phi3:mini")
     try:
-        r = httpx.post(OLLAMA_URL, timeout=timeout, json={
+        r = httpx.post(_env("OLLAMA_URL", DEFAULT_OLLAMA_URL), timeout=timeout, json={
             "model": model, "system": system, "prompt": user, "stream": False,
             "options": {"temperature": 0.2, "num_predict": 220},
         })

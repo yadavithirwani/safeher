@@ -1,0 +1,108 @@
+{
+  "_comment": "Demo areas. Add an area here, then run `python -m safeher.fetch <id>` from backend/. No code changes needed.",
+  "areas": [
+    {
+      "id": "blr-indiranagar-mg-road",
+      "city": "Bengaluru",
+      "name": "Indiranagar – MG Road",
+      "bbox": {
+        "south": 12.962,
+        "west": 77.6,
+        "north": 12.988,
+        "east": 77.648
+      },
+      "timezone": "Asia/Kolkata",
+      "ncrb_district": null,
+      "default_trip": [
+        "Indiranagar Metro",
+        "MG Road Metro"
+      ],
+      "landmarks": [
+        {
+          "name": "Indiranagar Metro",
+          "lat": 12.9784,
+          "lon": 77.6408
+        },
+        {
+          "name": "MG Road Metro",
+          "lat": 12.9756,
+          "lon": 77.6067
+        },
+        {
+          "name": "Trinity Metro",
+          "lat": 12.9729,
+          "lon": 77.617
+        },
+        {
+          "name": "Halasuru Metro",
+          "lat": 12.9762,
+          "lon": 77.6267
+        },
+        {
+          "name": "100 Feet Road, Indiranagar",
+          "lat": 12.9719,
+          "lon": 77.6412
+        },
+        {
+          "name": "Brigade Road",
+          "lat": 12.9719,
+          "lon": 77.6074
+        },
+        {
+          "name": "Cubbon Park",
+          "lat": 12.9763,
+          "lon": 77.6033
+        }
+      ]
+    },
+    {
+      "id": "del-hauz-khas-saket",
+      "city": "Delhi",
+      "name": "Hauz Khas – Saket",
+      "bbox": {
+        "south": 28.518,
+        "west": 77.195,
+        "north": 28.556,
+        "east": 77.23
+      },
+      "timezone": "Asia/Kolkata",
+      "ncrb_district": "South",
+      "default_trip": [
+        "Hauz Khas Metro",
+        "Select Citywalk, Saket"
+      ],
+      "landmarks": [
+        {
+          "name": "Hauz Khas Metro",
+          "lat": 28.5433,
+          "lon": 77.2067
+        },
+        {
+          "name": "Select Citywalk, Saket",
+          "lat": 28.5286,
+          "lon": 77.2195
+        },
+        {
+          "name": "Malviya Nagar Metro",
+          "lat": 28.5283,
+          "lon": 77.2054
+        },
+        {
+          "name": "Green Park",
+          "lat": 28.553,
+          "lon": 77.2068
+        },
+        {
+          "name": "Saket Metro",
+          "lat": 28.5206,
+          "lon": 77.2015
+        },
+        {
+          "name": "Panchsheel Park",
+          "lat": 28.5418,
+          "lon": 77.2183
+        }
+      ]
+    }
+  ]
+}

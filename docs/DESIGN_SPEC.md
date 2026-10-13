@@ -203,7 +203,7 @@ route_score   = 0.8 × length_weighted_mean(segment_score)
 ### 7.3 Data confidence
 - Each signal also returns a **confidence** (0–1) based on data coverage. Low-coverage signals have their weight redistributed and the UI shows "Limited data in this area" rather than a misleadingly precise score.
 - Score shown as a whole number plus band; detail view shows the confidence of each signal.
-- **Implemented rules** (`backend/safeher/scoring.py`, `signals.py`, weights version `2026-10-04.1`):
+- **Implemented rules** (`backend/safeher/scoring.py`, `signals.py`). Every value below lives in **`config/scoring.json`** (version `2026-10-13.1`):
   - Effective weight of a signal = base weight × confidence, renormalised to sum to 1. "No data" (confidence 0) therefore never counts as a low score.
   - A segment whose confidence-backed weight is < 15% of the total is **unscored**; a route with < 50% of its length scored shows "Limited data" instead of a number.
   - The worst-stretch term is a **length-weighted** 10th percentile, so short segments can't hide a long dark stretch.
@@ -217,7 +217,7 @@ route_score   = 0.8 × length_weighted_mean(segment_score)
 | Transit | 0.8 (0.6 when no stop is found in the search radius) |
 | Safe spaces | 0.7 |
 | Historical incidents | Set per city; low (≈0.2) while only district-level data exists |
-| Community reports | 0.4 with no reports (absence is weak evidence), rising 0.1 per report to 0.9 |
+| Community reports | **0.5, fixed.** It used to rise with the number of reports (0.4 → 0.9). Random end-to-end testing showed that let a *negative* report raise a stretch's score at night, by giving more weight to a value still higher than the other signals. A property test now checks over 5,000 random cases that negative reports never raise a score and positive ones never lower it. |
 
 - Report severity (points subtracted when fresh and verified): harassment 40 · unsafe crowd 25 · isolated stretch 20 · broken light 15 · poor footpath 10 · unsafe washroom 10 · positive −15 (adds). Pending reports count ×0.5; reports > 30 days old or future-dated are ignored. Broken-light reports affect only the reports signal, not lighting, to avoid double counting.
 
@@ -305,6 +305,26 @@ Rebuild with `python -m safeher.fetch` (from `backend/`). Snapshots are committe
 - Output per route: score, band, coverage, per-signal breakdown with confidence, reasons (generated from data only), **weak stretches** (≥ 100 m scoring < 50, with their main factors), and **safe stops** (nearest police, washroom, hospital and pharmacy within 300 m of the route, with distance along it). Walking speed is 80 m/min.
 - Measured: < 1 s for the first plan in an area, ~0.05 s after.
 
+
+### 8.6 Configuration: nothing city- or model-specific in code (13 Oct 2026)
+| File | Holds |
+|---|---|
+| `config/areas.json` | Demo areas: bbox, city, timezone, NCRB district, landmarks, default trip. Adding an area means one entry plus `python -m safeher.fetch <id>`. Validated on start-up: landmarks must lie inside their area, and the default trip must name two of its landmarks. |
+| `config/scoring.json` | The published, versioned scoring model: weights, route formula, bands, every signal threshold and confidence, report severities, typical opening hours, routing limits, when reasons are shown. Weights must sum to 1 (checked on start-up). |
+| `config/app.json` | Default area and departure time (`"21:30"` for night demos, `null` for now), helplines, disclaimer, basemaps, languages, nearby/search limits. |
+| `backend/.env` / environment | Secrets and machine-specific values: `GEMINI_API_KEY`, `GEMINI_MODEL`, `SAFEHER_LLM`, `OLLAMA_URL`, `OLLAMA_MODEL`, `EARTHDATA_TOKEN`, `OVERPASS_URLS`, `SAFEHER_CONFIG_DIR`, `SAFEHER_URL` (demo recorder). |
+
+- The frontend reads its city data, timezone, map styles, default trip and time, and languages from `/api/areas` and `/api/meta`; `app.js` holds no city data.
+- The demo recorder's captions (scores, lamp counts, times) come from the live API at recording time.
+- Tests compare against computed results, not fixed numbers.
+- The start-up validation found that the "Hauz Khas Village" landmark lay outside the Delhi bbox, so picking it would have failed. It was removed. Enlarging the area (and re-fetching it) would restore it.
+
+### 8.7 Search (implemented: `backend/safeher/search.py`)
+- Offline index per area built from the cached snapshot: landmarks, **every named place** in `pois.json` (not only scoring kinds), and **every named street** in the walking graph.
+- Matching ignores case and accents: exact name, then name prefix, then every typed word starting a word in the name ("12th main" → "12th Main Road"), then substring. Landmarks rank above places, places above streets.
+- Places sharing a name show their nearest street ("Starbucks · café · 100 Feet Road").
+- If nothing matches in the current area, matches from the other areas come back flagged; picking one switches city. If nothing matches anywhere, the app says which areas it covers.
+- **Not found yet:** abbreviations (OSM stores "State Bank of India", not "SBI"), place types not downloaded (bars, offices), house addresses, and anything outside the demo areas. An open geocoder (Photon / Nominatim) would cover these; it is optional because it sends typed queries to a third party.
 
 ## 9. Architecture (Google stack)
 
@@ -415,3 +435,8 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 13 Oct 2026 | Hand-off to Google Maps for navigation with waypoints | Spec §3 non-goal (no turn-by-turn); waypoints keep the chosen route |
 | 13 Oct 2026 | Explanations: Gemini → template; every answer fact-checked; local model opt-in (§5.4) | Scores stay rule-based; AI only words them. Template guarantees a faithful answer when Gemini is off or fails |
 | 13 Oct 2026 | Explanation card replaces the static comparison line | Same content; avoids saying it twice |
+| 13 Oct 2026 | All city data, model parameters and app settings moved to `config/*.json`; secrets and machine values via environment (§8.6) | "Make sure nothing is hardcoded": new cities and model changes need no code edits; published weights live in one versioned file |
+| 13 Oct 2026 | Reports signal confidence fixed at 0.5 (§7.3) | Random testing found a negative report could raise a score |
+| 13 Oct 2026 | Band, weak stretches and walking time computed from the displayed (rounded) numbers | Random testing found "50 · Less support", "weak stretch · score 50" and minute values off by one |
+| 13 Oct 2026 | Random end-to-end tests: trips drawn from the street graph with a printed seed, every feature checked, plus 14 invalid-request cases (`tests/test_random_trips.py`) | Fixed demo routes never hit boundary cases; 280+ random trips now pass |
+| 13 Oct 2026 | Offline place + street search with disambiguation and cross-city results (§8.7) | Typing a street or a chain name should work like a maps app |

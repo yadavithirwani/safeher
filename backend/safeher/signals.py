@@ -1,7 +1,7 @@
 """The five per-segment signals (design spec §7.2). Each returns a Reading: 0-100 value + 0-1 confidence.
 
 A reading with confidence 0 means "no data": its weight is redistributed to the other signals
-rather than being treated as a low score.
+rather than being treated as a low score. All thresholds and values come from config/scoring.json.
 """
 
 from __future__ import annotations
@@ -9,12 +9,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from . import config
+
 LIGHTING = "lighting"
 TRANSIT = "transit"
 SAFE_SPACES = "safe_spaces"
 INCIDENTS = "incidents"
 REPORTS = "reports"
 SIGNALS = (LIGHTING, TRANSIT, SAFE_SPACES, INCIDENTS, REPORTS)
+
+_C = config.scoring()
+_LIGHT, _TRANSIT, _SAFE, _REPORTS = _C["lighting"], _C["transit"], _C["safe_spaces"], _C["reports"]
 
 
 @dataclass(frozen=True)
@@ -39,67 +44,70 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 100.0) -> float:
 
 # --- Lighting -------------------------------------------------------------------------------
 
-# When a street has no lit=* tag and no mapped lamps, fall back to a weak prior from road class:
-# arterial roads in Indian cities are usually lit; footpaths and service lanes often aren't.
-_HIGHWAY_LIGHT_PRIOR = {
-    "trunk": 80, "primary": 80, "secondary": 75, "tertiary": 65,
-    "residential": 50, "living_street": 50, "unclassified": 45,
-    "service": 35, "footway": 40, "pedestrian": 60, "path": 25, "track": 15, "steps": 35,
-}
+LAMP_RADIUS_M = float(_LIGHT["lamp_radius_m"])
 
 
-def lighting(tags: dict | None, lamps_within_25m: int, night: bool,
+def lighting(tags: dict | None, lamps_nearby: int, night: bool,
              viirs_percentile: float | None = None) -> Reading:
+    """Best available source wins: OSM lit tag → mapped lamps → VIIRS → road-type estimate."""
     tags = tags or {}
     lit_tag = tags.get("lit", "")
     if isinstance(lit_tag, list):  # OSMnx merges ways; a mix of lit and unlit parts reads as "limited"
         values = {str(v).lower() for v in lit_tag}
         lit_tag = "limited" if len(values) > 1 else values.pop()
     lit = str(lit_tag).lower()
-    if lit in {"yes", "24/7", "automatic", "sunset-sunrise", "limited", "interval"}:
-        value = 70.0 if lit in {"limited", "interval"} else 100.0
-        return Reading(value, 0.9, f"tagged lit={lit}")
+    if lit in _LIGHT["lit_values"]:
+        return Reading(float(_LIGHT["lit_values"][lit]), _LIGHT["tag_confidence"], f"tagged lit={lit}")
     if lit == "no":
-        return Reading(0.0 if night else 50.0, 0.9, "tagged unlit")
-    if lamps_within_25m > 0:
-        return Reading(min(100.0, 60.0 + 20.0 * lamps_within_25m), 0.7, f"{lamps_within_25m} street lamps mapped")
+        value = _LIGHT["unlit_value_night"] if night else _LIGHT["unlit_value_day"]
+        return Reading(float(value), _LIGHT["tag_confidence"], "tagged unlit")
+    if lamps_nearby > 0:
+        value = min(100.0, _LIGHT["lamp_base"] + _LIGHT["lamp_step"] * lamps_nearby)
+        return Reading(float(value), _LIGHT["lamp_confidence"], f"{lamps_nearby} street lamps mapped")
     if viirs_percentile is not None:
         # Satellite night lights, ranked within the area: coarse (~500 m) but measured, not guessed.
-        return Reading(round(100.0 * viirs_percentile, 1), 0.45, "satellite night-time lights (VIIRS)")
+        return Reading(round(100.0 * viirs_percentile, 1), _LIGHT["viirs_confidence"],
+                       "satellite night-time lights (VIIRS)")
     highway = tags.get("highway")
     if isinstance(highway, list):
         highway = highway[0]
-    if highway in _HIGHWAY_LIGHT_PRIOR:
-        return Reading(float(_HIGHWAY_LIGHT_PRIOR[highway]), 0.3, f"estimated from road type ({highway})")
+    prior = _LIGHT["road_type_prior"]
+    if highway in prior:
+        return Reading(float(prior[highway]), _LIGHT["road_type_confidence"], f"estimated from road type ({highway})")
     return NO_DATA
 
 
 # --- Transit --------------------------------------------------------------------------------
 
+TRANSIT_SEARCH_M = float(_TRANSIT["search_radius_m"])
+
 
 def transit(nearest_stop_m: float | None) -> Reading:
-    """≤150 m to an active stop = 100, ≥800 m = 0, linear between."""
+    """Full score within `full_score_within_m` of an active stop, zero beyond `zero_score_beyond_m`."""
+    full, zero = _TRANSIT["full_score_within_m"], _TRANSIT["zero_score_beyond_m"]
     if nearest_stop_m is None:
-        return Reading(0.0, 0.6, "no stop within search radius")
-    if nearest_stop_m <= 150:
+        return Reading(0.0, _TRANSIT["confidence_when_none_found"], "no stop within search radius")
+    if nearest_stop_m <= full:
         value = 100.0
-    elif nearest_stop_m >= 800:
+    elif nearest_stop_m >= zero:
         value = 0.0
     else:
-        value = 100.0 * (800 - nearest_stop_m) / (800 - 150)
-    return Reading(value, 0.8, f"nearest stop {nearest_stop_m:.0f} m")
+        value = 100.0 * (zero - nearest_stop_m) / (zero - full)
+    return Reading(value, _TRANSIT["confidence"], f"nearest stop {nearest_stop_m:.0f} m")
 
 
 # --- Safe spaces ----------------------------------------------------------------------------
 
-STRONG_SAFE_SPACES = {"police", "hospital"}  # weighted x1.5 per spec
+SAFE_SPACE_RADIUS_M = float(_SAFE["radius_m"])
+SAFE_SPACE_KINDS = frozenset(_SAFE["kinds"])
+STRONG_SAFE_SPACES = frozenset(_SAFE["strong_kinds"])
 
 
 def safe_spaces(open_place_types: list[str]) -> Reading:
-    """Places open now within 150 m. Saturates at a weighted count of 3."""
-    weighted = sum(1.5 if t in STRONG_SAFE_SPACES else 1.0 for t in open_place_types)
-    value = min(1.0, weighted / 3.0) * 100.0
-    return Reading(value, 0.7, f"{len(open_place_types)} open places within 150 m")
+    """Open places nearby, saturating at a weighted count; police and hospitals count extra."""
+    weighted = sum(_SAFE["strong_multiplier"] if t in STRONG_SAFE_SPACES else 1.0 for t in open_place_types)
+    value = min(1.0, weighted / _SAFE["saturation"]) * 100.0
+    return Reading(value, _SAFE["confidence"], f"{len(open_place_types)} open places within {SAFE_SPACE_RADIUS_M:.0f} m")
 
 
 # --- Historical incidents -------------------------------------------------------------------
@@ -114,18 +122,12 @@ def incidents(city_percentile: float | None, confidence: float, note: str = "dis
 
 # --- Recent community reports ---------------------------------------------------------------
 
-REPORT_SEVERITY = {
-    "harassment": 40.0,
-    "unsafe_crowd": 25.0,
-    "isolated_stretch": 20.0,
-    "broken_light": 15.0,
-    "poor_footpath": 10.0,
-    "unsafe_washroom": 10.0,
-    "positive": -15.0,  # negative severity = adds support
-}
-VERIFICATION_FACTOR = {"pending": 0.5, "corroborated": 1.0, "partner": 1.0}
-REPORT_HALF_LIFE_DAYS = 7.0
-REPORT_MAX_AGE_DAYS = 30.0
+REPORT_RADIUS_M = float(_REPORTS["radius_m"])
+REPORT_SEVERITY = {k: float(v) for k, v in _REPORTS["severity"].items()}  # negative = adds support
+VERIFICATION_FACTOR = {k: float(v) for k, v in _REPORTS["verification_factor"].items()}
+REPORT_HALF_LIFE_DAYS = float(_REPORTS["half_life_days"])
+REPORT_MAX_AGE_DAYS = float(_REPORTS["max_age_days"])
+REPORTS_CONFIDENCE = float(_REPORTS["confidence"])
 
 
 @dataclass(frozen=True)
@@ -136,7 +138,7 @@ class Report:
 
 
 def reports(nearby: list[Report], now: datetime) -> Reading:
-    """Starts at 100; each report within 50 m subtracts severity x verification x age decay."""
+    """Starts at 100; each nearby report subtracts severity × verification × age decay."""
     penalty = 0.0
     counted = 0
     for r in nearby:
@@ -147,6 +149,6 @@ def reports(nearby: list[Report], now: datetime) -> Reading:
         penalty += REPORT_SEVERITY[r.category] * VERIFICATION_FACTOR[r.verification] * decay
         counted += 1
     note = f"{counted} recent reports" if counted else "no recent reports"
-    # Absence of reports is weak evidence, so confidence grows with the number of reports seen.
-    confidence = 0.4 if counted == 0 else min(0.9, 0.5 + 0.1 * counted)
-    return Reading(_clamp(100.0 - penalty), confidence, note)
+    # Fixed confidence: if it grew with the number of reports, a negative report would give more
+    # weight to this (still fairly high) value and could *raise* a stretch's score at night.
+    return Reading(_clamp(100.0 - penalty), REPORTS_CONFIDENCE, note)

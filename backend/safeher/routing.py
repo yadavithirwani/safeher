@@ -9,14 +9,18 @@ from functools import lru_cache
 
 import networkx as nx
 
+from . import config
 from .areas import AREAS, Area
 from .geo import LatLon, haversine_m
 from .viirs import ViirsGrid, load_for as load_viirs
 from .pois import SAFE_SPACE_KINDS, STOP_KINDS, TRANSIT_KINDS, Poi, PointIndex, pois_from_osm
 
-MAX_SNAP_M = 300  # origin/destination must be within this distance of a walkable street
-MAX_DETOUR = 1.5  # alternatives may be at most 50% longer than the shortest route
-MAX_OVERLAP = 0.8  # routes sharing more than 80% of their length are duplicates
+_R = config.scoring()["routing"]
+MAX_SNAP_M = float(_R["max_snap_m"])  # origin/destination must be this close to a walkable street
+MAX_DETOUR = float(_R["max_detour"])  # alternatives may be at most this many times the shortest length
+MAX_OVERLAP = float(_R["max_overlap"])  # routes sharing more of their length than this are duplicates
+SUPPORT_LAMBDAS = tuple(_R["support_lambdas"])  # how strongly "Most support" avoids weak streets
+ALTERNATIVE_PENALTIES = tuple(_R["alternative_penalties"])  # cost multiplier on already-used streets
 
 
 @dataclass
@@ -165,7 +169,7 @@ def candidate_paths(data: AreaData, origin: LatLon, dest: LatLon, edge_support: 
 
     if edge_support:
         # Prefer better-supported streets: a street scoring 0 "costs" up to (1 + λ)× its length.
-        for lam in (3.0, 1.5, 0.75):
+        for lam in SUPPORT_LAMBDAS:
             def by_support(u, v, d, lam=lam):
                 length = min(x["length"] for x in d.values())
                 return length * (1 + lam * (1 - edge_support.get(frozenset((u, v)), 50.0) / 100))
@@ -174,7 +178,7 @@ def candidate_paths(data: AreaData, origin: LatLon, dest: LatLon, edge_support: 
 
     # Penalise streets already used, to find a genuinely different option.
     used = {frozenset(p) for _, path in found for p in zip(path, path[1:])}
-    for penalty in (2.0, 4.0):
+    for penalty in ALTERNATIVE_PENALTIES:
         def by_penalised(u, v, d, penalty=penalty):
             length = min(x["length"] for x in d.values())
             return length * (penalty if frozenset((u, v)) in used else 1.0)

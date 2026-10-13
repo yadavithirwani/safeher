@@ -1,16 +1,7 @@
 /* SafeHer demo web app — vanilla JS + MapLibre. Talks to the FastAPI backend in backend/safeher/api.py. */
 "use strict";
 
-const STYLES = {
-  light: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
-  dark: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
-};
-const TZ = "Asia/Kolkata";
 const COLORS = { high: "#1F9E89", mid: "#E0A526", low: "#C2577A", none: "#9AA0A6", accent: "#F2A541", primary: "#5B2A86" };
-const DEFAULT_TRIPS = {
-  "del-hauz-khas-saket": ["Hauz Khas Metro", "Select Citywalk, Saket"],
-  "blr-indiranagar-mg-road": ["Indiranagar Metro", "MG Road Metro"],
-};
 const KIND_STYLE = {
   police: { icon: "local_police", color: "#1A73E8", label: "Police station" },
   toilets: { icon: "wc", color: "#12857A", label: "Washroom" },
@@ -66,7 +57,7 @@ function fmtClock(min) {
 }
 function nowParts() {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    timeZone: state.area?.timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   }).formatToParts(new Date()).map((x) => [x.type, x.value]));
   return { date: `${p.year}-${p.month}-${p.day}`, min: Number(p.hour) * 60 + Number(p.minute) };
 }
@@ -95,7 +86,7 @@ let map;
 
 function initMap(center) {
   map = new maplibregl.Map({
-    container: "map", style: STYLES.light, center: [center[1], center[0]], zoom: 14.2,
+    container: "map", style: state.meta.basemaps.light, center: [center[1], center[0]], zoom: 14.2,
     attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false,
   });
   map.touchZoomRotate.disableRotation();
@@ -151,7 +142,7 @@ function setDark(dark) {
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   if (dark === state.dark) return;
   state.dark = dark;
-  map.setStyle(dark ? STYLES.dark : STYLES.light, { diff: false }); // style.load re-adds our layers
+  map.setStyle(dark ? state.meta.basemaps.dark : state.meta.basemaps.light, { diff: false }); // style.load re-adds our layers
 }
 
 function applyTheme() {
@@ -207,24 +198,32 @@ function setPoint(which, p) {
 
 function setupSearch(inputSel, listSel, which) {
   const input = $(inputSel), list = $(listSel);
-  let items = [], active = -1;
+  let items = [], active = -1, empty = "";
   const render = () => {
+    if (empty) {
+      list.innerHTML = `<li class="suggest-empty">${icon("search_off")}<div><b>No matches for “${esc(empty)}”</b>
+        <small>SafeHer has data for ${esc(state.areas.map((a) => `${a.name} (${a.city})`).join(" and "))} only.</small></div></li>`;
+      return;
+    }
+    const glyph = (r) => (r.kind === "landmark" ? "location_on" : r.kind === "street" ? "add_road" : "place");
     list.innerHTML = items.map((r, i) => `<li role="option" data-i="${i}" aria-selected="${i === active}">
-      ${icon(r.detail.includes("landmark") ? "location_on" : "place")}<div><b>${esc(r.name)}</b><small>${esc(r.detail)}</small></div></li>`).join("");
+      ${icon(glyph(r))}<div><b>${esc(r.name)}</b><small>${esc(r.detail)}${r.other_area ? " · switches city" : ""}</small></div></li>`).join("");
   };
   const choose = (r) => {
-    items = []; render(); input.blur();
+    items = []; empty = ""; render(); input.blur();
+    if (r.area && r.area !== state.area.id) switchArea(r.area, false, false); // other city: start fresh there
     setPoint(which, { name: r.name, lat: r.lat, lon: r.lon });
     planTrip(true);
   };
-  const landmarkItems = () => state.area.landmarks.map((l) => ({ ...l, detail: `${state.area.city} · landmark` }));
+  const landmarkItems = () => state.area.landmarks.map((l) => ({ ...l, kind: "landmark", detail: `landmark · ${state.area.city}` }));
   const query = debounce(async () => {
     const q = input.value.trim();
-    if (!q) { items = landmarkItems(); active = -1; return render(); }
+    if (!q) { items = landmarkItems(); active = -1; empty = ""; return render(); }
     try { items = await api(`/api/search?q=${encodeURIComponent(q)}&area=${state.area.id}`); } catch { items = []; }
+    empty = items.length ? "" : q;
     active = items.length ? 0 : -1; render();
   }, 120);
-  input.addEventListener("focus", () => { input.select(); items = landmarkItems(); active = -1; render(); });
+  input.addEventListener("focus", () => { input.select(); items = landmarkItems(); active = -1; empty = ""; render(); });
   input.addEventListener("input", query);
   input.addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown") { active = Math.min(items.length - 1, active + 1); render(); e.preventDefault(); }
@@ -232,9 +231,9 @@ function setupSearch(inputSel, listSel, which) {
     else if (e.key === "Enter" && items[Math.max(active, 0)]) { choose(items[Math.max(active, 0)]); }
     else if (e.key === "Escape") { items = []; render(); input.blur(); }
   });
-  input.addEventListener("blur", () => setTimeout(() => { items = []; render(); if (state[which]) input.value = state[which].name; }, 150));
+  input.addEventListener("blur", () => setTimeout(() => { items = []; empty = ""; render(); if (state[which]) input.value = state[which].name; }, 150));
   list.addEventListener("mousedown", (e) => {
-    const li = e.target.closest("li"); if (li) { e.preventDefault(); choose(items[Number(li.dataset.i)]); }
+    const li = e.target.closest("li[data-i]"); if (li) { e.preventDefault(); choose(items[Number(li.dataset.i)]); }
   });
 }
 
@@ -449,8 +448,8 @@ function explanationCard() {
   const body = e?.error ? `<p class="ai-text muted">Couldn’t load the explanation: ${esc(e.error)}</p>`
     : e?.data ? `<p class="ai-text" lang="${esc(e.data.lang)}">${esc(e.data.text)}</p>`
     : `<div class="ai-loading"><i></i><i></i><i style="width:60%"></i></div>`;
-  const langs = [["en", "EN"], ["hi", "हिं"]].map(([k, l]) =>
-    `<button data-lang="${k}" aria-pressed="${state.lang === k}" aria-label="${k === "en" ? "English" : "Hindi"}">${l}</button>`).join("");
+  const langs = Object.entries(state.meta.languages).map(([k, l]) =>
+    `<button data-lang="${k}" aria-pressed="${state.lang === k}" aria-label="${esc(l.name)}">${esc(l.short)}</button>`).join("");
   return `<section class="ai-card" id="aiCard" aria-live="polite">
     <div class="ai-head">${icon("auto_awesome")}<span>${source}</span><div class="lang-toggle">${langs}</div></div>
     ${body}
@@ -563,7 +562,7 @@ async function showNearby(kind) {
   const st = KIND_STYLE[kind];
   renderSkeleton();
   try {
-    const res = await api(`/api/nearby?lat=${from.lat}&lon=${from.lon}&kind=${kind}&depart_at=${encodeURIComponent(departIso())}&limit=6`);
+    const res = await api(`/api/nearby?lat=${from.lat}&lon=${from.lon}&kind=${kind}&depart_at=${encodeURIComponent(departIso())}`);
     if (state.mode !== "nearby" || state.nearbyKind !== kind) return;
     state.nearby = res.results;
     clearMarkers("pois");
@@ -578,7 +577,7 @@ async function showNearby(kind) {
     }).join("");
     $("#view").innerHTML = `<div class="view-head"><button class="icon-btn" id="backBtn" aria-label="Back to routes">${icon("arrow_back")}</button>
       <h2>${kind === "open_places" ? "Open & staffed places" : st.label + "s"} near ${esc(from.name)}</h2></div>
-      ${items ? `<ul class="list" style="padding:4px 16px 12px">${items}</ul>` : `<div class="empty">Nothing found within 2.5 km.</div>`}`;
+      ${items ? `<ul class="list" style="padding:4px 16px 12px">${items}</ul>` : `<div class="empty">Nothing found within ${fmtDist(state.meta.nearby_radius_m)}.</div>`}`;
     $("#backBtn").addEventListener("click", backToRoutes);
     $("#view").querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => {
       const p = state.nearby[Number(b.dataset.go)];
@@ -670,23 +669,30 @@ function onMapClick(e) {
 }
 
 /* ---------- area & time ---------- */
+/* The area's configured default trip, else its first two landmarks, else nothing. */
+function defaultTrip(area) {
+  const byName = (n) => area.landmarks.find((l) => l.name === n);
+  if (area.default_trip) return area.default_trip.map(byName);
+  return [area.landmarks[0] || null, area.landmarks[1] || null];
+}
+
 function renderAreaSwitch() {
   $("#areaSwitch").innerHTML = state.areas.map((a) =>
     `<button role="tab" data-id="${a.id}" aria-selected="${a.id === state.area.id}">${esc(a.city === "Bengaluru" ? "Bengaluru" : a.city)}</button>`).join("");
   $("#areaSwitch").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => switchArea(b.dataset.id)));
 }
 
-function switchArea(id, keepPoints = false) {
+function switchArea(id, keepPoints = false, plan = true) {
   state.area = state.areas.find((a) => a.id === id) || state.areas[0];
   renderAreaSwitch();
   if (!keepPoints) {
-    const [o, d] = DEFAULT_TRIPS[state.area.id].map((n) => state.area.landmarks.find((l) => l.name === n));
+    const [o, d] = defaultTrip(state.area);
     setPoint("origin", o); setPoint("dest", d);
   }
   state.plan = null;
   map.jumpTo({ center: [state.area.center[1], state.area.center[0]], zoom: 14 });
   loadOverlays(); loadReports();
-  planTrip(true);
+  if (plan) planTrip(true);
 }
 
 function updateTimeLabel() {
@@ -732,13 +738,16 @@ async function main() {
     .map((h) => `<a href="tel:${h.number}"><b>${h.number}</b><span>${esc(h.label)}</span></a>`).join("");
 
   const hash = readHash();
-  state.area = state.areas.find((a) => a.id === hash.area) || state.areas.find((a) => a.id === "del-hauz-khas-saket") || state.areas[0];
+  state.area = state.areas.find((a) => a.id === hash.area) || state.areas.find((a) => a.id === state.meta.default_area) || state.areas[0];
   if (hash.t != null) { state.isNow = false; state.departMin = hash.t; }
-  else { state.isNow = false; state.departMin = 21 * 60 + 30; } // demo default: 9:30 PM
+  else if (state.meta.default_departure) { // config/app.json: e.g. "21:30" for night demos
+    const [h, m] = state.meta.default_departure.split(":").map(Number);
+    state.isNow = false; state.departMin = h * 60 + m;
+  } else { state.isNow = true; }
 
   renderAreaSwitch();
-  const preset = hash.o && hash.d ? [hash.o.name, hash.d.name] : DEFAULT_TRIPS[state.area.id];
-  $("#originInput").value = preset[0]; $("#destInput").value = preset[1];
+  const preset = hash.o && hash.d ? [hash.o, hash.d] : defaultTrip(state.area);
+  $("#originInput").value = preset[0]?.name || ""; $("#destInput").value = preset[1]?.name || "";
   updateTimeLabel(); renderSkeleton();
   await initMap(state.area.center);
   setupSheet();

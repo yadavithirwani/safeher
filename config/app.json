@@ -1,0 +1,45 @@
+{
+  "_comment": "App behaviour that isn't scoring. default_departure: \"HH:MM\" opens the app at that local time (good for night demos); null opens at the current time.",
+  "default_area": "del-hauz-khas-saket",
+  "default_departure": "21:30",
+  "helplines": [
+    {
+      "number": "112",
+      "label": "Emergency (police, fire, ambulance)"
+    },
+    {
+      "number": "181",
+      "label": "Women Helpline"
+    },
+    {
+      "number": "1091",
+      "label": "Women in Distress (police)"
+    }
+  ],
+  "basemaps": {
+    "light": "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    "dark": "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+  },
+  "languages": {
+    "en": {
+      "name": "English",
+      "short": "EN"
+    },
+    "hi": {
+      "name": "Hindi",
+      "short": "हिं"
+    }
+  },
+  "disclaimer": "Scores reflect available data and can't guarantee safety. In an emergency call 112.",
+  "nearby": {
+    "search_radius_m": 2500,
+    "duplicate_merge_m": 150,
+    "default_limit": 5
+  },
+  "search": {
+    "default_limit": 8
+  },
+  "explain": {
+    "endpoint_landmark_m": 150
+  }
+}

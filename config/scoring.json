@@ -1,0 +1,210 @@
+{
+  "_comment": "The published SafeHer scoring model (design spec §7). Bump `version` whenever any value changes.",
+  "version": "2026-10-13.1",
+  "weights": {
+    "night": {
+      "lighting": 0.3,
+      "transit": 0.15,
+      "safe_spaces": 0.25,
+      "incidents": 0.15,
+      "reports": 0.15
+    },
+    "day": {
+      "lighting": 0.05,
+      "transit": 0.2,
+      "safe_spaces": 0.3,
+      "incidents": 0.2,
+      "reports": 0.25
+    },
+    "transition_minutes": 30
+  },
+  "route": {
+    "mean_share": 0.8,
+    "worst_share": 0.2,
+    "worst_percentile": 0.1,
+    "min_confidence_mass": 0.15,
+    "min_coverage": 0.5
+  },
+  "bands": [
+    {
+      "min": 75,
+      "label": "More support"
+    },
+    {
+      "min": 50,
+      "label": "Mixed"
+    },
+    {
+      "min": 0,
+      "label": "Less support"
+    }
+  ],
+  "lighting": {
+    "tag_confidence": 0.9,
+    "lit_values": {
+      "yes": 100,
+      "24/7": 100,
+      "automatic": 100,
+      "sunset-sunrise": 100,
+      "limited": 70,
+      "interval": 70
+    },
+    "unlit_value_night": 0,
+    "unlit_value_day": 50,
+    "lamp_radius_m": 25,
+    "lamp_confidence": 0.7,
+    "lamp_base": 60,
+    "lamp_step": 20,
+    "viirs_confidence": 0.45,
+    "road_type_confidence": 0.3,
+    "road_type_prior": {
+      "trunk": 80,
+      "primary": 80,
+      "secondary": 75,
+      "tertiary": 65,
+      "residential": 50,
+      "living_street": 50,
+      "unclassified": 45,
+      "service": 35,
+      "footway": 40,
+      "pedestrian": 60,
+      "path": 25,
+      "track": 15,
+      "steps": 35
+    }
+  },
+  "transit": {
+    "full_score_within_m": 150,
+    "zero_score_beyond_m": 800,
+    "search_radius_m": 800,
+    "confidence": 0.8,
+    "confidence_when_none_found": 0.6
+  },
+  "safe_spaces": {
+    "radius_m": 150,
+    "saturation": 3,
+    "strong_kinds": [
+      "police",
+      "hospital"
+    ],
+    "strong_multiplier": 1.5,
+    "confidence": 0.7,
+    "kinds": [
+      "police",
+      "hospital",
+      "clinic",
+      "pharmacy",
+      "fuel",
+      "convenience",
+      "supermarket",
+      "mall",
+      "cafe",
+      "restaurant"
+    ]
+  },
+  "reports": {
+    "radius_m": 50,
+    "confidence": 0.5,
+    "half_life_days": 7,
+    "max_age_days": 30,
+    "severity": {
+      "harassment": 40,
+      "unsafe_crowd": 25,
+      "isolated_stretch": 20,
+      "broken_light": 15,
+      "poor_footpath": 10,
+      "unsafe_washroom": 10,
+      "positive": -15
+    },
+    "verification_factor": {
+      "pending": 0.5,
+      "corroborated": 1.0,
+      "partner": 1.0
+    }
+  },
+  "typical_hours": {
+    "_comment": "Used when OSM has no opening_hours. null = assume open 24/7. [open, close] in local time.",
+    "police": null,
+    "hospital": null,
+    "metro": [
+      "05:30",
+      "23:30"
+    ],
+    "rail": [
+      "04:00",
+      "23:59"
+    ],
+    "bus_stop": [
+      "05:00",
+      "23:00"
+    ],
+    "fuel": [
+      "06:00",
+      "23:00"
+    ],
+    "pharmacy": [
+      "09:00",
+      "22:00"
+    ],
+    "clinic": [
+      "09:00",
+      "20:00"
+    ],
+    "convenience": [
+      "08:00",
+      "22:00"
+    ],
+    "supermarket": [
+      "09:00",
+      "22:00"
+    ],
+    "mall": [
+      "10:00",
+      "22:00"
+    ],
+    "cafe": [
+      "11:00",
+      "23:00"
+    ],
+    "restaurant": [
+      "11:00",
+      "23:00"
+    ],
+    "toilets": [
+      "06:00",
+      "22:00"
+    ],
+    "_default": [
+      "09:00",
+      "21:00"
+    ]
+  },
+  "routing": {
+    "segment_m": 50,
+    "walk_m_per_min": 80,
+    "max_snap_m": 300,
+    "max_detour": 1.5,
+    "max_overlap": 0.8,
+    "support_lambdas": [
+      3.0,
+      1.5,
+      0.75
+    ],
+    "alternative_penalties": [
+      2.0,
+      4.0
+    ],
+    "weak_stretch_score_below": 50,
+    "weak_stretch_min_m": 100,
+    "stop_search_m": 300,
+    "unscored_street_support": 50,
+    "stop_sample_m": 25
+  },
+  "reasons": {
+    "_comment": "When the route card mentions a highlight: share of the route length that must qualify.",
+    "lit_min_share": 0.3,
+    "lit_value_at_least": 70,
+    "near_transit_min_share": 0.3,
+    "estimated_lighting_note_share": 0.5
+  }
+}
