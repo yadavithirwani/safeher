@@ -191,6 +191,14 @@ button { cursor: pointer; }
 .ai-loading { margin-top: 10px; display: grid; gap: 7px; }
 .ai-loading i { display: block; height: 11px; border-radius: 6px; background: var(--surface); animation: pulse 1.2s ease-in-out infinite; }
 
+/* Plan B access estimates */
+.backup { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; }
+.backup p { font-size: 13px; line-height: 1.5; margin: 8px 0; }
+.backup h4 { font-size: 13px; margin: 12px 0 6px; }
+.backup summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 13px; }
+.backup button { min-height: 44px; }
+.backup button:focus-visible, .backup summary:focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
+
 /* Route detail */
 .detail { padding: 4px 16px 16px 16px; }
 .detail h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--text-2); font-weight: 500; margin: 18px 0 8px; }

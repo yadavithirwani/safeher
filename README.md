@@ -25,6 +25,19 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 
 Recording instructions: [demo/README.md](demo/README.md). The new recorder never overwrites either version.
 
+## Plan B Coverage
+
+Route cards now show a separate **Plan B Coverage** estimate: the longest sampled walk to a potentially available help point, route share within five minutes, and clickable coverage gaps. It does not change safety scores or route ranking.
+
+- Uses directed shortest walking-network distances to police, hospitals, pharmacies, shops and other existing support POIs; explicitly restricted-access places are excluded.
+- Samples roughly every 50 m. Opening hours are checked at estimated route arrival time in minute buckets, conservatively requiring the place to remain open through the following 16-minute window. This can exclude a nearby place that closes soon.
+- Missing/invalid opening hours use flagged typical-hour assumptions; mapped hours do not verify real availability or willingness to assist.
+- A point-to-street connector within 100 m is a straight-line approximation, not a verified entrance or crossing. Interior edge access and travel time are estimates, not navigation instructions.
+- Searches up to 15 minutes at 80 m/min. Missing or disconnected mapped coverage is shown as unknown, never zero or evidence that no help exists. Graph boundaries and incomplete POI data limit results.
+- The UI lists gaps beyond five minutes and can highlight them on the map. This is not a guarantee of refuge or emergency assistance.
+
+Tests: `cd backend && ../.venv/bin/pytest tests/test_backup.py`.
+
 ## MVP features
 1. Map with 2–3 candidate routes
 2. Transparent, rule-based safety score
