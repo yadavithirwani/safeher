@@ -326,6 +326,33 @@ Rebuild with `python -m safeher.fetch` (from `backend/`). Snapshots are committe
 - If nothing matches in the current area, matches from the other areas come back flagged; picking one switches city. If nothing matches anywhere, the app says which areas it covers.
 - **Not found yet:** abbreviations (OSM stores "State Bank of India", not "SBI"), place types not downloaded (bars, offices), house addresses, and anything outside the demo areas. An open geocoder (Photon / Nominatim) would cover these; it is optional because it sends typed queries to a third party.
 
+### 8.8 Google Maps Platform (implemented, off until a key is set; `backend/safeher/google.py`)
+| Feature | API | Behaviour without key / on failure |
+|---|---|---|
+| Basemap | **Map Tiles API** 2D roadmap, light + dark (styled session), proxied by the backend; Google Maps wordmark + live viewport attribution | CARTO basemap |
+| Search | **Places API (New) Autocomplete**, restricted to the current area's rectangle, session tokens; coordinates only via Place Details on selection | Offline search (§8.7) |
+| Nearby quick actions | **Places API (New) Nearby Search** with `currentOpeningHours.openNow`, for trips leaving within 30 min of now | OSM with typical hours |
+| Route comparison | **Routes API** walking routes with alternatives, **scored by SafeHer's engine** (each piece takes the nearest OSM street's tags); a Google route matching one of ours (≥85% within 20 m) becomes an "Also Google's route" chip | SafeHer routes only, with a data note |
+| Street View | **Street View Static API** image of a weak stretch, facing along it; free metadata check first | Button hidden |
+| Explanations | **Gemini** (§5.4) | Template |
+
+- **Terms:** Places and Routes content may only appear on a Google map, so every Google content feature also requires the Google basemap (`g_on()` in `api.py`, tested). Only place IDs are kept; tiles and images pass through with `Cache-Control: no-store`. The key never reaches the browser.
+- **Config:** `config/app.json → google` (feature switches, place types per quick action, timeouts, dark styles). Key: `GOOGLE_MAPS_API_KEY` in `backend/.env`.
+- **Verification:** 23 tests against a mock built from documented response shapes (request building, parsing, fallbacks, terms), plus a test-only simulated-Google server for browser tests. **Real behaviour is checked with `python -m safeher.google_check`** once a key exists; it has not been run yet (no key).
+
+### 8.9 Stress testing (13–14 Oct 2026)
+| Layer | What | Found and fixed |
+|---|---|---|
+| Random trips | Seeded trips from the street graph, every feature checked; 280+ trips | Negative report raising a score; band/weak-stretch/minute rounding |
+| Data integrity | Graph coordinates, edge length vs geometry, connectivity (100% of nodes in one component in both areas), tag vocabularies, places (unique, in area, every quick-action kind present), opening-hours parsing (1 unparseable value in Delhi), help points reachable, landmark snapping (all < 50 m), NCRB rebuild equality, config consistency | Nothing wrong in the data; one test bug |
+| Fuzzing (hypothesis) | Random and malformed input to every endpoint incl. live sharing, up to 1,000 cases each; no 5xx allowed | Year-9999 departure overflowed Plan B (→ departure window, `departure_window_days`); report in Halasuru Lake crashed (→ 422) |
+| Load (`tests/tools/load_test.py`) | 40 simultaneous users, realistic mix, 60 s | "database is locked" in live sharing; explain re-planned every trip |
+| Equivalence | Optimised Plan B vs original on random trips around closing times | Identical output |
+
+**Load results (40 users, same seed):** 1 worker before: 15.8 req/s, plan p50 2.8 s, 8 failures → 4 workers after: **118.6 req/s, 0 errors**, plan p50 0.20 s (p99 5.9 s on cold hours), explain/search/nearby p50 6–12 ms, live sharing p50 0.27–0.59 s under deliberately saturated load.
+
+**Live-sharing storage:** stays SQLite (transactional, many small writes). WAL for multi-worker reads, in-process write lock, and a WAL checkpoint + truncate after any deletion so a stopped/expired location leaves no bytes on disk (tested with a second worker connection open). **DuckDB** was considered and suits the planned analytics dashboard (§5.8), not this store: it allows only one read-write process per database file.
+
 ## 9. Architecture (Google stack)
 
 ```
@@ -440,3 +467,9 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 13 Oct 2026 | Band, weak stretches and walking time computed from the displayed (rounded) numbers | Random testing found "50 · Less support", "weak stretch · score 50" and minute values off by one |
 | 13 Oct 2026 | Random end-to-end tests: trips drawn from the street graph with a printed seed, every feature checked, plus 14 invalid-request cases (`tests/test_random_trips.py`) | Fixed demo routes never hit boundary cases; 280+ random trips now pass |
 | 13 Oct 2026 | Offline place + street search with disambiguation and cross-city results (§8.7) | Typing a street or a chain name should work like a maps app |
+| 14 Oct 2026 | Merged Anushka's live sharing and Plan B coverage (branch `main-anushka`) into `feature/google-integration` | Teammate work; all her tests pass |
+| 14 Oct 2026 | Plan B made 5–6× faster with identical output; its constants moved to config | Plan latency had grown to 0.5–1.7 s per request |
+| 14 Oct 2026 | Google Maps Platform as optional layer with Google basemap gating all Google content (§8.8) | Google's terms; demo never depends on a key |
+| 14 Oct 2026 | Stress-testing suite: data integrity, fuzzing, load, equivalence (§8.9) | "Stress test all the data" |
+| 14 Oct 2026 | Run with 4 workers; plans cached and shared with explanations | 7× throughput under load |
+| 14 Oct 2026 | Live sharing stays on SQLite (WAL + wipe after delete); DuckDB reserved for analytics | DuckDB is single-writer-process; SQLite fits small concurrent writes |
