@@ -10,9 +10,9 @@ from . import config, ncrb
 from .backup import BackupCoverage
 from . import signals as sig
 from .areas import Area, area_for
-from .geo import LatLon, haversine_m, interpolate, split_polyline
+from .geo import LatLon, haversine_m, interpolate, polyline_distance_m, split_polyline
 from .pois import Poi, PointIndex
-from .routing import AreaData, Edge, candidate_paths, load_area, path_edges
+from .routing import AreaData, Edge, candidate_paths, edge_between, load_area, path_edges
 from .scoring import WEIGHTS_VERSION, SegmentScore, band, night_fraction, score_route, score_segment, weights_at
 
 _C = config.scoring()
@@ -231,7 +231,97 @@ def incident_note(ctx: TripContext) -> str:
             "so it doesn't change which route ranks first.")
 
 
-def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLon, sig.Report]] = ()) -> dict:
+# --- External routes (e.g. Google): scored by the same engine ----------------------------------
+
+_EDGE_SAMPLES: dict[str, PointIndex] = {}
+EDGE_SAMPLE_M = 15.0
+SAME_ROUTE_M = 20.0  # an external route within this distance of one of ours is "the same street"
+SAME_ROUTE_SHARE = 0.85
+
+
+def _edge_samples(data: AreaData) -> PointIndex:
+    """Points every ~15 m along every street, carrying that street's OSM tags (built once per area)."""
+    idx = _EDGE_SAMPLES.get(data.area.id)
+    if idx is None:
+        items = []
+        for u, v, d in data.graph.edges(data=True):
+            e = edge_between(data, u, v)
+            for piece in split_polyline(e.points, EDGE_SAMPLE_M) if len(e.points) > 1 else []:
+                items.append((interpolate(piece[0], piece[-1], 0.5), e.tags))
+        idx = _EDGE_SAMPLES[data.area.id] = PointIndex(items)
+    return idx
+
+
+def score_polyline(ctx: TripContext, points: list[LatLon], match_m: float) -> tuple[list[PieceInfo], float]:
+    """Score any walking polyline. Each ~50 m piece takes the tags of the nearest mapped street
+    within `match_m`; unmatched pieces get no tags (lighting then falls back to satellite/no data).
+    Returns (pieces, share of length matched to a mapped street)."""
+    samples = _edge_samples(ctx.data)
+    pieces, matched = [], 0.0
+    for pts in split_polyline(points, SEGMENT_M):
+        mid = interpolate(pts[0], pts[-1], 0.5)
+        hit = samples.nearest(mid, match_m)
+        tags = hit[1] if hit else None
+        readings, places = readings_at(ctx, mid, tags)
+        length = sum(haversine_m(a, b) for a, b in zip(pts, pts[1:]))
+        matched += length if hit else 0.0
+        pieces.append(PieceInfo(length, pts, score_segment(readings, ctx.weights), places))
+    total = sum(pc.length_m for pc in pieces) or 1.0
+    return pieces, matched / total
+
+
+def _same_as(points: list[LatLon], line: list[LatLon]) -> float:
+    """Share of `points`' length lying within SAME_ROUTE_M of `line`."""
+    total = near = 0.0
+    for pts in split_polyline(points, SEGMENT_M):
+        length = sum(haversine_m(a, b) for a, b in zip(pts, pts[1:]))
+        total += length
+        if polyline_distance_m(interpolate(pts[0], pts[-1], 0.5), line) <= SAME_ROUTE_M:
+            near += length
+    return near / total if total else 0.0
+
+
+def _route_payload(ctx: TripContext, label: str, pieces: list[PieceInfo], line: list[LatLon],
+                   plan_b: dict | None, source: str) -> dict:
+    rs = score_route([(p.length_m, p.segment) for p in pieces], ctx.weights)
+    highlights, reasons = describe(pieces, ctx.local)
+    distance = sum(p.length_m for p in pieces)
+    return {
+        "plan_b": plan_b,
+        "label": label,
+        "source": source,
+        "distance_m": round(distance),
+        "duration_min": round(round(distance) / WALK_M_PER_MIN),  # from the distance shown
+        "score": None if rs.score is None else round(rs.score),
+        "band": "Limited data" if rs.score is None else band(round(rs.score)),
+        "coverage": round(rs.coverage, 3),
+        "breakdown": [
+            {"signal": k, "label": SIGNAL_LABELS[k], "value": None if v is None else round(v),
+             "confidence": round(rs.signal_confidence[k], 2), "base_weight": round(ctx.weights[k], 3)}
+            for k, v in rs.signal_means.items()
+        ],
+        "highlights": highlights,
+        "reasons": reasons,
+        "weak_stretches": weak_stretches(pieces),
+        "stops": stops_along(ctx.data, line, ctx.local),
+        "geometry": [[round(a, 6), round(b, 6)] for a, b in line],
+        "pieces": [{"coords": [[round(a, 6), round(b, 6)] for a, b in pc.points],
+                    "score": None if pc.segment.score is None else round(pc.segment.score),
+                    # Lighting shown on the map only when it's measured (tag, lamps or satellite).
+                    "light": (round(pc.segment.readings[sig.LIGHTING].value)
+                              if pc.segment.readings[sig.LIGHTING].confidence >= MEASURED_LIGHT_CONFIDENCE else None)}
+                   for pc in pieces],
+    }
+
+
+def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLon, sig.Report]] = (),
+         external_routes: list[dict] = (), external_match_m: float = 25.0) -> dict:
+    """Plan and score walking routes.
+
+    external_routes: [{"label", "source", "points": [(lat, lon), …]}] from another router (Google).
+    They are scored by the same engine; one that follows an existing route is folded into it
+    (that route gets `also_<source>: true`) instead of being listed twice.
+    """
     if when.tzinfo is None:
         raise ValueError("departure time must be timezone-aware")
     area: Area | None = area_for(*origin)
@@ -243,39 +333,28 @@ def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLo
     reports_key = hash(tuple((p, r.category, r.created_at, r.verification) for p, r in reports))
 
     backup = BackupCoverage(data, when)
-    routes = []
+    routes, lines = [], []
     for label, nodes in candidate_paths(data, origin, dest, edge_support(ctx, reports_key)):
         edges = path_edges(data, nodes)
         line = [edges[0].points[0]] + [p for e in edges for p in e.points[1:]]
-        pieces = score_pieces(ctx, edges)
-        rs = score_route([(p.length_m, p.segment) for p in pieces], ctx.weights)
-        highlights, reasons = describe(pieces, ctx.local)
-        distance = sum(p.length_m for p in pieces)
-        routes.append({
-            "plan_b": backup.describe(edges),
-            "label": label,
-            "distance_m": round(distance),
-            "duration_min": round(round(distance) / WALK_M_PER_MIN),  # from the distance shown
-            "score": None if rs.score is None else round(rs.score),
-            "band": "Limited data" if rs.score is None else band(round(rs.score)),
-            "coverage": round(rs.coverage, 3),
-            "breakdown": [
-                {"signal": k, "label": SIGNAL_LABELS[k], "value": None if v is None else round(v),
-                 "confidence": round(rs.signal_confidence[k], 2), "base_weight": round(ctx.weights[k], 3)}
-                for k, v in rs.signal_means.items()
-            ],
-            "highlights": highlights,
-            "reasons": reasons,
-            "weak_stretches": weak_stretches(pieces),
-            "stops": stops_along(data, line, ctx.local),
-            "geometry": [[round(a, 6), round(b, 6)] for a, b in line],
-            "pieces": [{"coords": [[round(a, 6), round(b, 6)] for a, b in pc.points],
-                        "score": None if pc.segment.score is None else round(pc.segment.score),
-                        # Lighting shown on the map only when it's measured (tag, lamps or satellite).
-                        "light": (round(pc.segment.readings[sig.LIGHTING].value)
-                                  if pc.segment.readings[sig.LIGHTING].confidence >= MEASURED_LIGHT_CONFIDENCE else None)}
-                       for pc in pieces],
-        })
+        routes.append(_route_payload(ctx, label, score_pieces(ctx, edges), line, backup.describe(edges), "safeher"))
+        lines.append(line)
+
+    notes = []
+    for ext in external_routes:
+        pts = [tuple(p) for p in ext["points"]]
+        if len(pts) < 2 or not all(area.contains(*p) for p in pts):
+            notes.append(f"A {ext['source']} route leaves the demo area, so it isn't scored.")
+            continue
+        same = next((i for i, line in enumerate(lines) if _same_as(pts, line) >= SAME_ROUTE_SHARE), None)
+        if same is not None:
+            routes[same][f"also_{ext['source']}"] = True
+            continue
+        pieces, matched = score_polyline(ctx, pts, external_match_m)
+        r = _route_payload(ctx, ext["label"], pieces, pts, None, ext["source"])
+        r["matched_share"] = round(matched, 3)
+        routes.append(r)
+        lines.append(pts)
 
     routes.sort(key=lambda r: (r["score"] is None, -(r["score"] or 0)))
     return {
@@ -285,7 +364,7 @@ def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLo
         "weights_version": WEIGHTS_VERSION,
         "routes": routes,
         "data_notes": [incident_note(ctx),
-                       "Opening hours are assumed from typical hours where OpenStreetMap has none."],
+                       "Opening hours are assumed from typical hours where OpenStreetMap has none."] + notes,
         "disclaimer": DISCLAIMER,
         "attribution": "© OpenStreetMap contributors (ODbL)",
     }

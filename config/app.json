@@ -41,5 +41,72 @@
   },
   "explain": {
     "endpoint_landmark_m": 150
+  },
+  "google": {
+    "_comment": "Used only when GOOGLE_MAPS_API_KEY is set in backend/.env. Turn individual features off here.",
+    "features": {
+      "map_tiles": true,
+      "autocomplete": true,
+      "nearby": true,
+      "routes": true,
+      "streetview": true
+    },
+    "timeout_s": 6,
+    "language": "en",
+    "region": "IN",
+    "autocomplete_min_chars": 3,
+    "nearby_types": {
+      "police": [
+        "police"
+      ],
+      "toilets": [
+        "public_bathroom"
+      ],
+      "hospital": [
+        "hospital"
+      ],
+      "pharmacy": [
+        "pharmacy",
+        "drugstore"
+      ],
+      "open_places": [
+        "convenience_store",
+        "supermarket",
+        "cafe",
+        "restaurant",
+        "gas_station",
+        "shopping_mall"
+      ]
+    },
+    "route_label": "Google route",
+    "route_edge_match_m": 25,
+    "streetview_size": [
+      640,
+      360
+    ],
+    "streetview_radius_m": 50,
+    "dark_map_styles": [
+      {
+        "stylers": [
+          {
+            "invert_lightness": true
+          },
+          {
+            "saturation": -70
+          },
+          {
+            "lightness": -8
+          }
+        ]
+      },
+      {
+        "featureType": "poi",
+        "stylers": [
+          {
+            "visibility": "simplified"
+          }
+        ]
+      }
+    ]
   }
 }

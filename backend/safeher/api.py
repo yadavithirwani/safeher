@@ -7,18 +7,21 @@ import logging
 from contextlib import asynccontextmanager, suppress
 import json
 import threading
+import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import Path as PathParam
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import trips
 from . import signals as sig
-from . import config
+from . import config, google
 from .areas import AREAS, area_for
 from .config import REPO_ROOT
 from .geo import LatLon, haversine_m
@@ -33,7 +36,15 @@ WEB_DIR = REPO_ROOT / "app" / "web"
 REPORTS_FILE = Path(__file__).resolve().parents[1] / "var" / "reports.jsonl"
 
 APP = config.app()
+GOOGLE = APP["google"]
+
+
+def g_on(feature: str) -> bool:
+    """A Google feature is usable only with its own switch AND the Google basemap: Google's terms
+    don't allow Places or Routes content on a non-Google map."""
+    return google.feature(feature) and (feature == "map_tiles" or google.feature("map_tiles"))
 NEARBY_RADIUS_M = float(APP["nearby"]["search_radius_m"])
+GOOGLE_ROUTE_TTL_S = 300
 DUPLICATE_MERGE_M = float(APP["nearby"]["duplicate_merge_m"])
 ENDPOINT_LANDMARK_M = float(APP["explain"]["endpoint_landmark_m"])
 
@@ -147,12 +158,14 @@ def meta():
         "nearby_radius_m": NEARBY_RADIUS_M,
         "languages": APP["languages"],
         "disclaimer": DISCLAIMER,
+        "google": {f: g_on(f) for f in GOOGLE["features"]},
+        "google_autocomplete_min_chars": GOOGLE["autocomplete_min_chars"],
     }
 
 
 @app.get("/api/search")
 def search(q: str = Query(min_length=1, max_length=80), area: str | None = None,
-           limit: int = APP["search"]["default_limit"]):
+           limit: int = APP["search"]["default_limit"], session: str | None = Query(default=None, max_length=64)):
     """Places, streets and landmarks. With `area`, searches it first; if nothing matches there,
     results from the other demo areas come back flagged `other_area` so the app can offer a switch."""
     if area and area not in AREAS:
@@ -161,7 +174,20 @@ def search(q: str = Query(min_length=1, max_length=80), area: str | None = None,
     results = place_search(q, first, limit)
     if not results and area:
         results = [{**r, "other_area": True} for r in place_search(q, [a for a in AREAS if a != area], limit)]
-    return results
+    if area and g_on("autocomplete") and len(q.strip()) >= GOOGLE["autocomplete_min_chars"]:
+        a = AREAS[area]
+        try:
+            preds = google.client().autocomplete(q.strip(), (a.south, a.west, a.north, a.east), session)
+        except google.GoogleError:
+            preds = []  # local results still work
+        local_names = {r["name"].lower() for r in results}
+        for pr in preds:
+            if pr["main"].lower() in local_names:
+                continue
+            results.append({"name": pr["main"], "kind": "google", "place_id": pr["place_id"], "source": "google",
+                            "detail": " · ".join(x for x in (pr["secondary"], "Google") if x), "area": area,
+                            "city": a.city})
+    return results[: limit + 5]
 
 
 def _parse_departure(depart_at: datetime | None, p: LatLon) -> datetime:
@@ -177,10 +203,39 @@ def _parse_departure(depart_at: datetime | None, p: LatLon) -> datetime:
 def plan_trip(req: PlanRequest):
     o, d = (req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)
     when = _parse_departure(req.depart_at, o)
+    external, note = _google_routes(o, d)
     try:
-        return plan(o, d, when, _reports_for_planning())
+        result = plan(o, d, when, _reports_for_planning(), external, float(GOOGLE["route_edge_match_m"]))
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+    if note:
+        result["data_notes"].append(note)
+    result["google_map"] = g_on("map_tiles")
+    return result
+
+
+_route_cache: "OrderedDict[tuple, list]" = OrderedDict()
+
+
+def _google_routes(o: LatLon, d: LatLon) -> tuple[list[dict], str | None]:
+    """Google walking routes don't depend on departure time, so dragging the time slider reuses
+    them (kept in memory for this process only, a few minutes at most)."""
+    if not g_on("routes"):
+        return [], None
+    key = (round(o[0], 5), round(o[1], 5), round(d[0], 5), round(d[1], 5))
+    hit = _route_cache.get(key)
+    if hit and time.time() - hit[0] < GOOGLE_ROUTE_TTL_S:
+        return hit[1], None
+    try:
+        routes = google.client().walking_routes(o, d)
+    except google.GoogleError as e:
+        return [], f"Google routes unavailable ({e}); showing SafeHer routes only."
+    external = [{"label": GOOGLE["route_label"] if i == 0 else f"{GOOGLE['route_label']} {i + 1}",
+                 "source": "google", "points": r["points"]} for i, r in enumerate(routes)]
+    _route_cache[key] = (time.time(), external)
+    while len(_route_cache) > 64:
+        _route_cache.popitem(last=False)
+    return external, None
 
 
 _place_names: dict[str, set[str]] = {}
@@ -220,6 +275,12 @@ def nearby(lat: float, lon: float, kind: NearbyKind, depart_at: datetime | None 
     when = _parse_departure(depart_at, (lat, lon))
     data = load_area(area_for(lat, lon).id)
     local = when.astimezone(data.area.tz)
+    if g_on("nearby") and abs((when - datetime.now(timezone.utc)).total_seconds()) < 1800:
+        # Google's "open now" is live, so it's only used for trips leaving about now.
+        try:
+            return _google_nearby(lat, lon, kind, local, limit, data)
+        except google.GoogleError:
+            pass  # fall back to OpenStreetMap below
     index = data.safe_spaces if kind == "open_places" else data.stops
     out = []
     for dist, poi in index.within((lat, lon), NEARBY_RADIUS_M):
@@ -240,7 +301,94 @@ def nearby(lat: float, lon: float, kind: NearbyKind, depart_at: datetime | None 
                     "lamps_nearby": lamps, "phone": poi.tags.get("phone") or poi.tags.get("contact:phone")})
         if len(out) >= limit:
             break
-    return {"kind": kind, "at": local.isoformat(timespec="minutes"), "results": out}
+    return {"kind": kind, "at": local.isoformat(timespec="minutes"), "source": "openstreetmap", "results": out}
+
+
+def _google_nearby(lat, lon, kind, local, limit, data):
+    places = google.client().nearby(lat, lon, GOOGLE["nearby_types"][kind], NEARBY_RADIUS_M, limit * 2)
+    out = []
+    for g in places:
+        if not data.area.contains(g["lat"], g["lon"]):
+            continue
+        if kind == "open_places" and g["open"] is not True:
+            continue
+        dist = haversine_m((lat, lon), (g["lat"], g["lon"]))
+        if dist > NEARBY_RADIUS_M:
+            continue
+        our_kind = kind if kind != "open_places" else "open_places"
+        out.append({"name": g["name"] or KIND_LABELS.get(our_kind, our_kind).capitalize(), "kind": our_kind,
+                    "label": KIND_LABELS.get(our_kind, g["type"].replace("_", " ")), "lat": g["lat"],
+                    "lon": g["lon"], "distance_m": round(dist), "open": g["open"], "hours_assumed": False,
+                    "hours_source": "google", "opening_hours": None, "lamps_nearby": 0, "phone": g["phone"],
+                    "place_id": g["place_id"]})
+    out.sort(key=lambda x: x["distance_m"])
+    return {"kind": kind, "at": local.isoformat(timespec="minutes"), "source": "google", "results": out[:limit]}
+
+
+def _need(feature: str) -> None:
+    if not g_on(feature):
+        raise HTTPException(404, f"Google {feature.replace('_', ' ')} is not enabled")
+
+
+def _image(content: bytes, content_type: str) -> Response:
+    # Pass-through only: Google's terms don't allow caching tiles or images.
+    return Response(content, media_type=content_type, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/google/tiles/{style}/{z}/{x}/{y}", include_in_schema=False)
+def google_tile(style: Literal["light", "dark"], z: int = PathParam(ge=0, le=22), x: int = PathParam(ge=0),
+                y: int = PathParam(ge=0)):
+    _need("map_tiles")
+    if x >= 2 ** z or y >= 2 ** z:
+        raise HTTPException(404, "tile out of range")
+    try:
+        return _image(*google.client().tile(style, z, x, y))
+    except google.GoogleError as e:
+        raise HTTPException(502, f"Google tiles unavailable: {e}") from e
+
+
+@app.get("/api/google/attribution")
+def google_attribution(style: Literal["light", "dark"], zoom: int = Query(ge=0, le=22),
+                       north: float = Query(ge=-90, le=90), south: float = Query(ge=-90, le=90),
+                       east: float = Query(ge=-180, le=180), west: float = Query(ge=-180, le=180)):
+    _need("map_tiles")
+    try:
+        return {"copyright": google.client().viewport_copyright(style, zoom, north, south, east, west)}
+    except google.GoogleError as e:
+        raise HTTPException(502, f"Google attribution unavailable: {e}") from e
+
+
+@app.get("/api/google/place/{place_id}")
+def google_place(place_id: str = PathParam(pattern=r"^[A-Za-z0-9_-]{10,300}$"),
+                 session: str | None = Query(default=None, max_length=64)):
+    _need("autocomplete")
+    try:
+        p = google.client().place(place_id, session)
+    except google.GoogleError as e:
+        raise HTTPException(502, f"Google place lookup failed: {e}") from e
+    a = area_for(p["lat"], p["lon"])
+    if a is None:
+        raise HTTPException(422, f"{p['name'] or 'That place'} is outside the demo areas: {_area_list()}.")
+    return {**p, "area": a.id, "city": a.city}
+
+
+@app.get("/api/google/streetview/available")
+def google_streetview_available(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180)):
+    _need("streetview")
+    try:
+        return {"available": google.client().streetview_available(lat, lon, int(GOOGLE["streetview_radius_m"]))}
+    except google.GoogleError as e:
+        raise HTTPException(502, f"Street View unavailable: {e}") from e
+
+
+@app.get("/api/google/streetview", include_in_schema=False)
+def google_streetview(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180),
+                      heading: float = Query(ge=-360, le=720)):
+    _need("streetview")
+    try:
+        return _image(*google.client().streetview_image(lat, lon, heading, int(GOOGLE["streetview_radius_m"])))
+    except google.GoogleError as e:
+        raise HTTPException(502, f"Street View unavailable: {e}") from e
 
 
 @app.get("/api/layers/{area_id}")
