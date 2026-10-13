@@ -6,6 +6,10 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 
 > SafeHer helps you make safer, better-informed decisions. It does not guarantee safety. In an emergency, call **112**.
 
+## Current implementation guide
+
+**[Read the end-to-end pipeline, inputs, outputs and feature status](docs/CURRENT_PIPELINE.md)** — the source of truth for what is implemented today, including the exact AI boundary, datasets, scoring, Plan B Coverage, live sharing, API contracts and limitations. [The design spec](docs/DESIGN_SPEC.md) also includes planned features; it is not an implementation checklist.
+
 ## Demo
 
 [![SafeHer demo: Hauz Khas Metro to Select Citywalk, Delhi, at 9:30 PM. Click to play the video.](docs/media/demo-poster.jpg)](docs/media/safeher-demo.mp4)
@@ -47,12 +51,14 @@ Tests: `cd backend && ../.venv/bin/pytest tests/test_backup.py`.
 ## MVP features
 1. Map with 2–3 candidate routes
 2. Transparent, rule-based safety score
-3. Five data signals: lighting · transit proximity · verified safe spaces · historical anonymised incidents · recent community reports
-4. Gemini route explanation and multilingual Q&A
-5. Safe stops: nearest police station, closest washroom, well-lit places along the route
-6. Community hazard reporting
+3. Five data signals: lighting · transit proximity · mapped potentially open places · district-level historical incidents · recent community reports
+4. English/Hindi route explanations via optional Gemini or Ollama, with a template fallback
+5. Stops along routes and nearby police stations, washrooms, hospitals and pharmacies
+6. Community hazard reporting (pending reports; no moderation/verification workflow yet)
 7. Opt-in live location sharing (web foreground-only; expiring viewer link)
-8. Aggregated, privacy-preserving hotspot dashboard
+8. Plan B walking-network coverage estimates and clickable gaps
+
+General multilingual Q&A and the aggregated H3 hotspot dashboard are **planned, not implemented**.
 
 ## Run the demo
 ```bash
