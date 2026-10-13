@@ -1,20 +1,82 @@
-"""Plan B access estimates on the directed walking graph, separate from safety scoring."""
+"""Plan B access estimates on the directed walking graph, separate from safety scoring.
+
+Parameters come from config/scoring.json ("plan_b"). Results are identical to the original
+implementation (tests/reference/backup_v1.py, checked in tests/test_backup_equivalence.py); this
+version avoids repeated work:
+  - each place's opening status is computed once per trip minute, not 17 times per bucket;
+  - the multi-source search runs once per distinct set of open places (sets change only when a
+    place opens or closes), cached across requests for the same graph;
+  - reverse adjacency with the shortest parallel edge is built once per graph.
+"""
 from __future__ import annotations
 
 import heapq
 import math
+import weakref
+from collections import OrderedDict
 from datetime import timedelta
 from itertools import count
 
+from . import config
 from .geo import haversine_m, interpolate, split_polyline
 from .pois import SAFE_SPACE_KINDS
 
-WALK_M_PER_MIN = 80.0
-SAMPLE_M = 50.0
-POI_SNAP_M = 100.0
-LIMIT_MIN = 15
-GAP_MIN = 5
-PRIVATE_ACCESS = {"no", "private", "customers", "permit", "members"}
+_P = config.scoring()["plan_b"]
+VERSION = str(_P["version"])
+WALK_M_PER_MIN = float(config.scoring()["routing"]["walk_m_per_min"])
+SAMPLE_M = float(_P["sample_m"])
+POI_SNAP_M = float(_P["poi_snap_m"])
+LIMIT_MIN = int(_P["search_limit_min"])
+GAP_MIN = int(_P["gap_threshold_min"])
+PRIVATE_ACCESS = frozenset(_P["private_access_values"])
+_SEARCH_CACHE_MAX = int(_P["search_cache_size"])
+
+_REVERSE: "weakref.WeakKeyDictionary[object, dict]" = weakref.WeakKeyDictionary()
+_SEARCHES: "weakref.WeakKeyDictionary[object, OrderedDict]" = weakref.WeakKeyDictionary()
+
+
+def _reverse_adjacency(graph) -> dict:
+    """node → [(predecessor, shortest parallel edge length)], built once per graph object."""
+    rev = _REVERSE.get(graph)
+    if rev is None:
+        rev = {n: [(p, min(float(e["length"]) for e in opts.values())) for p, opts in graph.pred[n].items()]
+               for n in graph.nodes}
+        _REVERSE[graph] = rev
+    return rev
+
+
+def _multi_source(graph, sources: tuple) -> tuple[dict, dict]:
+    """Reversed multi-source Dijkstra from (osm, node, connector) sources; cached per graph + source set.
+
+    Returns (distances, nearest_source_index) where the index points into `sources`.
+    """
+    cache = _SEARCHES.setdefault(graph, OrderedDict())
+    if sources in cache:
+        cache.move_to_end(sources)
+        return cache[sources]
+    distances, nearest = {}, {}
+    heap, sequence = [], count()
+    for i, (_, node, connector) in enumerate(sources):  # sources are sorted by osm id, like v1
+        if connector < distances.get(node, math.inf):
+            distances[node] = connector
+            nearest[node] = i
+            heapq.heappush(heap, (connector, next(sequence), node))
+    rev = _reverse_adjacency(graph)
+    limit = LIMIT_MIN * WALK_M_PER_MIN
+    while heap:
+        distance, _, node = heapq.heappop(heap)
+        if distance != distances[node]:
+            continue
+        for predecessor, length in rev.get(node, ()):
+            candidate = distance + length
+            if candidate <= limit and candidate < distances.get(predecessor, math.inf):
+                distances[predecessor] = candidate
+                nearest[predecessor] = nearest[node]
+                heapq.heappush(heap, (candidate, next(sequence), predecessor))
+    cache[sources] = (distances, nearest)
+    if len(cache) > _SEARCH_CACHE_MAX:
+        cache.popitem(last=False)
+    return distances, nearest
 
 
 class BackupCoverage:
@@ -40,43 +102,28 @@ class BackupCoverage:
             if hit:
                 connector, node = hit
                 self.places.append((poi, node, connector))
+        self.places.sort(key=lambda item: item[0].osm)
+        self._open: dict[int, list[tuple[bool, bool]]] = {}  # minute → per-place (open, assumed)
         self.cache = {}
+
+    def _status(self, minute: int) -> list[tuple[bool, bool]]:
+        if minute not in self._open:
+            local = (self.departure + timedelta(minutes=minute)).astimezone(self.data.area.tz)
+            self._open[minute] = [poi.is_open(local) for poi, _, _ in self.places]
+        return self._open[minute]
 
     def distances(self, elapsed_min):
         # Minute buckets: require a place open throughout the possible arrival window.
         minute = math.floor(elapsed_min)
         if minute in self.cache:
             return self.cache[minute]
-        local = (self.departure + timedelta(minutes=minute)).astimezone(self.data.area.tz)
-        end = (self.departure + timedelta(minutes=minute + LIMIT_MIN + 1)).astimezone(self.data.area.tz)
-        candidates = []
-        for poi, node, connector in self.places:
-            # Check each minute, not just endpoints (split opening intervals exist).
-            times = [local + timedelta(minutes=i) for i in range(LIMIT_MIN + 2)]
-            readings = [poi.is_open(t) for t in times]
-            if all(opened for opened, _ in readings) and poi.is_open(end)[0]:
-                candidates.append((poi, node, connector, any(assumed for _, assumed in readings)))
-        distances, nearest = {}, {}
-        heap, sequence = [], count()
-        for poi, node, connector, assumed in sorted(candidates, key=lambda item: item[0].osm):
-            if connector < distances.get(node, math.inf):
-                distances[node] = connector
-                nearest[node] = (poi, assumed)
-                heapq.heappush(heap, (connector, next(sequence), node))
-        graph = self.data.graph
-        limit = LIMIT_MIN * WALK_M_PER_MIN
-        while heap:
-            distance, _, node = heapq.heappop(heap)
-            if distance != distances[node]:
-                continue
-            for predecessor, options in graph.pred[node].items():
-                length = min(float(edge["length"]) for edge in options.values())
-                candidate = distance + length
-                if candidate <= limit and candidate < distances.get(predecessor, math.inf):
-                    distances[predecessor] = candidate
-                    nearest[predecessor] = nearest[node]
-                    heapq.heappush(heap, (candidate, next(sequence), predecessor))
-        result = (distances, nearest, len(candidates), sum(c[3] for c in candidates))
+        window = [self._status(minute + i) for i in range(LIMIT_MIN + 2)]  # minutes m … m+16 inclusive
+        chosen = [i for i in range(len(self.places)) if all(w[i][0] for w in window)]
+        assumed = {i: any(w[i][1] for w in window) for i in chosen}
+        sources = tuple((self.places[i][0].osm, self.places[i][1], self.places[i][2]) for i in chosen)
+        dist, nearest_idx = _multi_source(self.data.graph, sources)
+        nearest = {node: (self.places[chosen[k]][0], assumed[chosen[k]]) for node, k in nearest_idx.items()}
+        result = (dist, nearest, len(chosen), sum(assumed.values()))
         self.cache[minute] = result
         return result
 
@@ -126,7 +173,7 @@ class BackupCoverage:
         worst = max(known, key=lambda s: s["distance"]) if known else None
         unknown_m = sum(s["length"] for s in samples if s["distance"] is None)
         covered = sum(s["length"] for s in known if s["distance"] <= GAP_MIN * WALK_M_PER_MIN)
-        return {"version": "1", "threshold_min": GAP_MIN, "search_limit_min": LIMIT_MIN,
+        return {"version": VERSION, "threshold_min": GAP_MIN, "search_limit_min": LIMIT_MIN,
             "sample_spacing_m": SAMPLE_M, "walking_speed_m_per_min": WALK_M_PER_MIN,
             "within_threshold_share": round(covered / along, 3) if along else 0,
             "unavailable_length_m": round(unknown_m),
@@ -140,9 +187,5 @@ class BackupCoverage:
             "eligible_places_min": min((s["eligible"] for s in samples), default=0),
             "assumed_hours_places_max": max((s["assumed"] for s in samples), default=0),
             "gaps": gaps,
-            "limitations": "Estimated from sampled route stretches and cached walking streets, not verified entrances. "
-                "POIs connect to a street node within 100 m using a straight-line estimate. "
-                "Hours must indicate open throughout a 16-minute window at estimated route arrival; "
-                "missing or invalid hours use typical assumptions. No mapped option within 15 minutes "
-                "does not mean no help exists. Businesses are not verified refuges; access and assistance are not guaranteed. "
-                "This metric does not change the route score or ranking."}
+            "limitations": _P["limitations"].format(snap=f"{POI_SNAP_M:.0f}", window=LIMIT_MIN + 1,
+                                                     limit=LIMIT_MIN)}

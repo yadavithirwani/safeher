@@ -206,5 +206,22 @@
     "lit_value_at_least": 70,
     "near_transit_min_share": 0.3,
     "estimated_lighting_note_share": 0.5
+  },
+  "plan_b": {
+    "_comment": "Plan B access coverage (separate from the score; never changes ranking).",
+    "version": "1",
+    "sample_m": 50,
+    "poi_snap_m": 100,
+    "search_limit_min": 15,
+    "gap_threshold_min": 5,
+    "private_access_values": [
+      "no",
+      "private",
+      "customers",
+      "permit",
+      "members"
+    ],
+    "search_cache_size": 256,
+    "limitations": "Estimated from sampled route stretches and cached walking streets, not verified entrances. POIs connect to a street node within {snap} m using a straight-line estimate. Hours must indicate open throughout a {window}-minute window at estimated route arrival; missing or invalid hours use typical assumptions. No mapped option within {limit} minutes does not mean no help exists. Businesses are not verified refuges; access and assistance are not guaranteed. This metric does not change the route score or ranking."
   }
 }
