@@ -31,3 +31,6 @@ build/
 # Large data
 data/raw/
 *.geojson.gz
+
+# OSMnx HTTP cache
+backend/cache/

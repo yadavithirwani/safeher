@@ -231,6 +231,55 @@ For the MVP the backend runs on open data with no paid API keys. Google services
 
 - **Cached snapshots:** public Overpass servers time out often, so each demo area is downloaded once (with mirror fallback) into `data/` and the API serves from that cache. The demo never depends on a live third-party server.
 
+### 8.2 Demo areas and measured data coverage (fetched 7 Oct 2026)
+Rebuild with `python -m safeher.fetch` (from `backend/`). Snapshots are committed in `data/areas/` (~9 MB) so the demo works offline.
+
+| Area | Walkable network | Streets tagged `lit=*` | Street lamps mapped | Places with `opening_hours` |
+|---|---|---|---|---|
+| `blr-indiranagar-mg-road` (Bengaluru) | 700 km | 10% | 589 | 5% of 2,120 |
+| `del-hauz-khas-saket` (Delhi) | 526 km | 0.1% | 0 | 15% of 667 |
+
+**Consequences:**
+- Delhi lighting is almost entirely the road-type estimate (confidence 0.3). A real lighting source (VIIRS night lights, or municipal streetlight data) is the most valuable data addition, especially for Delhi.
+- Unknown opening hours use **typical hours by type**, flagged as assumed in the API output (`hours_assumed`): police and hospitals 24/7 · metro 05:30–23:30 · fuel 06–23 · pharmacy, convenience, supermarket 08/09–22 · mall 10–22 · café and restaurant 11–23 · washroom 06–22. Scores drop sharply after 23:00 mostly because of these assumptions, and the UI must say so.
+- Historical incidents: see §8.4.
+
+### 8.4 Historical incidents: NCRB (implemented: `backend/safeher/ncrb.py`)
+- **Source:** NCRB *Crime in India*, district-wise crimes against women 2017–2022 (CSV from India Data Portal). The raw file goes in `data/raw/ncrb/` (gitignored). `python -m safeher.ncrb` builds `data/incidents/ncrb_delhi_police_districts.json` (committed).
+- **Heads used (public spaces only):** assault on women (IPC 354), insult to modesty (509), attempt to rape, kidnapping/abduction (others). Domestic heads (cruelty by husband, dowry, DV Act) and cyber crimes are excluded.
+- **Years:** average of 2019, 2021 and 2022. 2020 is skipped because of lockdown distortion.
+- **Units:** Delhi's 15 territorial police districts. Non-geographic units (Crime Branch, EOW, IGI Airport, Metro, Railway, Special Cell, SPUWAC, Vigilance) are excluded. The value is the city-relative percentile of average cases. The demo area Hauz Khas–Saket is mapped to **South** district (196 cases/year, 11th of 15, where 1 = fewest), assuming the whole area falls in South district.
+- **Bengaluru:** NCRB reports "Bengaluru City" as a single unit, so there's nothing to compare within the city. The signal stays "no data" (weight redistributed) rather than a constant.
+- **Confidence 0.15:** raw counts with no population adjustment, registered cases reflect reporting rates, and there is one value per district. Because every route in an area gets the same value, it **never changes which route ranks first**. It only sets context, and the API says so in `data_notes`.
+- **Upgrade path (incidents):** Delhi police station boundaries (DataMeet / GSDL GeoJSON, 180 stations) would allow per-point district lookup. Safetipin or Safecity data (on request) would give street-level signals.
+
+### 8.5 Lighting fallback: NASA VIIRS night lights (implemented: `backend/safeher/viirs.py`; data pending)
+- **Product:** NASA Black Marble **VNP46A4** (yearly, snow-free, near-nadir composite, ~500 m pixels), fetched with the World Bank's `blackmarblepy` (MIT). Tiles h25v06 (Delhi) and h25v07 (Bengaluru), cropped to each demo area and saved as `data/areas/<area>/viirs.npz`. The raw HDF5 files go in `data/raw/viirs/` (gitignored).
+- **Access:** a free NASA Earthdata account. Store the token as `EARTHDATA_TOKEN` in `backend/.env` (gitignored), never in code, chat or commits. Fetch with `python -m safeher.viirs`.
+- **Lighting precedence** (first available wins):
+
+| Source | Value | Confidence |
+|---|---|---|
+| OSM `lit=*` tag | 100 / 70 / 0 | 0.9 |
+| Mapped street lamps within 25 m | 60 + 20 per lamp | 0.7 |
+| **VIIRS radiance, percentile within the demo area** | 0–100 | **0.45** |
+| Road-type prior | 15–80 | 0.3 |
+
+- **Limits:** VIIRS measures upward light at ~500 m. It separates dark parks and campuses from lit arterials, but can't see a single dark lane between lit buildings, so it never overrides OSM tags or lamps. Bright commercial areas (malls, signage) read as lit even where streets aren't. The UI groups VIIRS with "estimated" lighting.
+- **Check:** a real-data test asserts Hauz Khas Deer Park is darker than Aurobindo Marg at Hauz Khas metro.
+
+### 8.3 Routing (implemented: `backend/safeher/routing.py`, `plan.py`)
+- Walking graph from OSMnx (`network_type="walk"`). Origin and destination snap to the nearest street node within 300 m.
+- Up to three candidates:
+  1. **Shortest** by length.
+  2. **Most support:** street cost = length × (1 + λ·(1 − support/100)), trying λ = 3 → 1.5 → 0.75 until the result is within the detour limit. Support is each street's score at the departure hour (cached per area and hour).
+  3. **Alternative:** streets already used cost 2× (then 4×) to force a genuinely different option.
+- Any candidate more than **1.5×** the shortest length, or sharing more than **80%** of its length with an existing one, is dropped. Results are sorted by score.
+- Each route is split into ~50 m pieces. Signals are read at each piece's midpoint: lamps within 25 m, open transit within 800 m, open safe spaces within 150 m, reports within 50 m.
+- **Safe-space kinds** (when open): police, hospital, clinic, pharmacy, fuel, convenience, supermarket, mall, café, restaurant/fast food. Banks and ATMs are fetched but not counted.
+- Output per route: score, band, coverage, per-signal breakdown with confidence, reasons (generated from data only), **weak stretches** (≥ 100 m scoring < 50, with their main factors), and **safe stops** (nearest police, washroom, hospital and pharmacy within 300 m of the route, with distance along it). Walking speed is 80 m/min.
+- Measured: < 1 s for the first plan in an area, ~0.05 s after.
+
 
 ## 9. Architecture (Google stack)
 
@@ -314,7 +363,7 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | **Week 2** | Gemini explain + Q&A; safe stops layer (police, washroom, well-lit); reporting; trip sharing |
 | **Week 3** | Dashboard; privacy hardening; multilingual polish; demo script and video |
 
-> **Revised 4 Oct 2026:** submission is under a week away. Priority order: (1) scoring engine + tests ✅, (2) OSM data cache + routing for Delhi and Bengaluru, (3) safe stops along the route, (4) explanation with guardrail tests, (5) API, (6) frontend. Dashboard, trip sharing and reporting UI only if time allows.
+> **Revised 4 Oct 2026:** submission is under a week away. Priority order: (1) scoring engine + tests ✅, (2) OSM data cache + routing for Delhi and Bengaluru ✅, (3) safe stops along the route, (4) explanation with guardrail tests, (5) API, (6) frontend. Dashboard, trip sharing and reporting UI only if time allows.
 
 ## 15. Team notes
 - Feature additions from 1 Oct discussion: **nearest police station** (Shreya), **closest washroom** and **well-lit places when planning a trip** — incorporated in §5.5.
@@ -329,3 +378,10 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 4 Oct 2026 | Cache OSM snapshots per demo area | Public Overpass servers frequently time out |
 | 4 Oct 2026 | Confidence-weighted scoring; "no data" ≠ low score (§7.3) | Avoids penalising unmapped areas, which skews against under-mapped neighbourhoods |
 | 4 Oct 2026 | Scoring covered by unit tests incl. spec invariants (worst-stretch, decay, bands without "safe") | "Make sure it works correctly" |
+| 7 Oct 2026 | Demo areas: Indiranagar–MG Road (BLR), Hauz Khas–Saket (DEL); snapshots committed | Reproducible offline demo |
+| 7 Oct 2026 | Typical-hours fallback for places without `opening_hours`, flagged as assumed (§8.2) | Only 5–15% of places have hours; skipping them would make every night score near zero |
+| 7 Oct 2026 | "Most support" route found by support-weighted cost, capped at 1.5× shortest (§8.3) | Shows a better option instead of only grading given ones; caps unrealistic detours |
+| 7 Oct 2026 | Restaurants and cafés count as safe spaces when open | Staffed, lit and busy; matches §5.5 "well-lit places" |
+| 7 Oct 2026 | NCRB incidents added for Delhi (15 police districts, public-space heads, 2019/21/22 average, confidence 0.15); Bengaluru stays "no data" (§8.4) | Real, open, citable; honest about being district-level and count-based |
+| 7 Oct 2026 | Lighting source for Delhi (VIIRS) flagged as top data gap | Delhi has ~0% lit tags and no mapped lamps |
+| 7 Oct 2026 | VIIRS VNP46A4 yearly via `blackmarblepy` as lighting fallback at confidence 0.45, below OSM tags and lamps (§8.5) | Measured beats guessed; yearly composite avoids cloud and moon noise; 500 m too coarse to override street-level data |

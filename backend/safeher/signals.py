@@ -48,9 +48,14 @@ _HIGHWAY_LIGHT_PRIOR = {
 }
 
 
-def lighting(tags: dict | None, lamps_within_25m: int, night: bool) -> Reading:
+def lighting(tags: dict | None, lamps_within_25m: int, night: bool,
+             viirs_percentile: float | None = None) -> Reading:
     tags = tags or {}
-    lit = str(tags.get("lit", "")).lower()
+    lit_tag = tags.get("lit", "")
+    if isinstance(lit_tag, list):  # OSMnx merges ways; a mix of lit and unlit parts reads as "limited"
+        values = {str(v).lower() for v in lit_tag}
+        lit_tag = "limited" if len(values) > 1 else values.pop()
+    lit = str(lit_tag).lower()
     if lit in {"yes", "24/7", "automatic", "sunset-sunrise", "limited", "interval"}:
         value = 70.0 if lit in {"limited", "interval"} else 100.0
         return Reading(value, 0.9, f"tagged lit={lit}")
@@ -58,6 +63,9 @@ def lighting(tags: dict | None, lamps_within_25m: int, night: bool) -> Reading:
         return Reading(0.0 if night else 50.0, 0.9, "tagged unlit")
     if lamps_within_25m > 0:
         return Reading(min(100.0, 60.0 + 20.0 * lamps_within_25m), 0.7, f"{lamps_within_25m} street lamps mapped")
+    if viirs_percentile is not None:
+        # Satellite night lights, ranked within the area: coarse (~500 m) but measured, not guessed.
+        return Reading(round(100.0 * viirs_percentile, 1), 0.45, "satellite night-time lights (VIIRS)")
     highway = tags.get("highway")
     if isinstance(highway, list):
         highway = highway[0]
@@ -97,11 +105,11 @@ def safe_spaces(open_place_types: list[str]) -> Reading:
 # --- Historical incidents -------------------------------------------------------------------
 
 
-def incidents(city_percentile: float | None, confidence: float) -> Reading:
+def incidents(city_percentile: float | None, confidence: float, note: str = "district-level official data") -> Reading:
     """Inverse of incident-density percentile (0 = lowest in city). Coarse by design."""
     if city_percentile is None:
         return NO_DATA
-    return Reading(_clamp(100.0 * (1.0 - city_percentile)), confidence, "district-level official data")
+    return Reading(_clamp(100.0 * (1.0 - city_percentile)), confidence, note)
 
 
 # --- Recent community reports ---------------------------------------------------------------
