@@ -48,8 +48,9 @@ Solid arrows are requests, dashed arrows are replies. The plan is cached, so the
 | `backend/safeher/search.py` | City-wide place, neighbourhood and street search |
 | `backend/safeher/google.py` | Google Maps Platform client (tiles, Places, Routes, Street View) |
 | `backend/safeher/userdb.py`, `trips.py` | SQLite for reports and live sharing |
-| `backend/safeher/api.py` | FastAPI endpoints and the web app |
-| `app/web/` | The web app (MapLibre): `app.js` map and routes, `sharing.js`/`live.js` live sharing, `backup.js` Plan B |
+| `backend/safeher/chatbot/` | **HerSide** chat companion (Anushka): Google ADK supervisor and specialist agents on Ollama or Gemini, validated tools (Google Places/Routes first, city-wide OSM data as fallback), SOS fast path. Details: [backend/CHATBOT_README.md](../backend/CHATBOT_README.md), [CURRENT_PIPELINE.md §6](CURRENT_PIPELINE.md) |
+| `backend/safeher/api.py` | FastAPI endpoints (including `POST /api/chat`) and the web app |
+| `app/web/` | The web app (MapLibre): `app.js` map and routes, `sharing.js`/`live.js` live sharing, `backup.js` Plan B, `chatbot.js` HerSide |
 | `config/` | `cities.json` (cities and data sources), `scoring.json` (scoring model), `app.json` (app defaults) |
 
 Design decisions and their reasons are in the [design spec](DESIGN_SPEC.md), §8.13 and the decision log (§16).

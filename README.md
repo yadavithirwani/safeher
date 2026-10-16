@@ -16,6 +16,7 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 | **NASA Earthdata token** (free) | building the data (night lights) | Sign up at [urs.earthdata.nasa.gov](https://urs.earthdata.nasa.gov) → *Generate Token*. Then sign in once at [ladsweb.modaps.eosdis.nasa.gov](https://ladsweb.modaps.eosdis.nasa.gov) with the same account and accept the data licence, or downloads are redirected to the licence page. |
 | Google Maps API key *(optional)* | Google basemap, search suggestions, live "open now", Google route comparison, Street View | [Google Cloud console](https://console.cloud.google.com/google/maps-apis): create a project with billing, enable **Map Tiles API, Places API (New), Routes API, Street View Static API**, create a key and restrict it to those APIs. |
 | Gemini API key *(optional)* | plain-language route explanations | [Google AI Studio](https://aistudio.google.com/apikey) (free tier). |
+| [Ollama](https://ollama.com) with `llama3.2:3b` *(optional)* | the **HerSide** chat companion, run locally | Install Ollama, then `ollama pull llama3.2:3b`. Settings in [backend/CHATBOT_README.md](backend/CHATBOT_README.md). |
 
 Without the optional keys the app runs fully on open data: a CARTO basemap (OpenStreetMap data), local search, and a fact-based summary instead of Gemini's explanation. A key that **is** set but fails (wrong, out of quota, API not enabled) is shown as an error, never silently replaced.
 
@@ -73,22 +74,28 @@ Each signal carries a confidence, and missing data is never scored as bad. Gemin
 
 More: [Architecture](docs/ARCHITECTURE.md) (data sources and the full request flow) · [Design spec](docs/DESIGN_SPEC.md) (product, scoring model, decision log).
 
-## Demo
+## Current implementation guide
 
-[![SafeHer demo: Hauz Khas Metro to Select Citywalk, Delhi, at 9:30 PM. Click to play the video.](docs/media/demo-poster.jpg)](docs/media/safeher-demo.mp4)
+**[Read the end-to-end pipeline, inputs, outputs and feature status](docs/CURRENT_PIPELINE.md)** — the source of truth for what is implemented today, including the exact AI boundary, datasets, scoring, Plan B Coverage, live sharing, API contracts and limitations. [The design spec](docs/DESIGN_SPEC.md) also includes planned features; it is not an implementation checklist.
 
-▶️ **[Watch the 2½-minute demo video](docs/media/safeher-demo.mp4)** (MP4, 8.7 MB, captioned). It shows:
-- Night-time route comparison in Delhi: the best-supported route is slightly longer and scores higher than the shortest
-- Weak stretches, safe stops and the per-signal breakdown
-- Scores changing with time of day (1 PM vs 11:45 PM)
-- Nearest police and washrooms, and how the score is calculated
-- Bengaluru's street lamps on the night map, reporting and SOS
+## HerSide · chat companion
 
-## Demo · Plan B Coverage + live sharing
+Initial Google ADK supervisor/specialist agents and `POST /api/chat` are implemented, with Ollama configuration, Google Maps tools and a model-independent SOS response. **Live Ollama/ADK/Places smoke checks have passed; model reliability and Geocoding configuration still need work.** Setup, tests and limitations: [backend/CHATBOT_README.md](backend/CHATBOT_README.md). Open **HerSide · Ask for help** above the route cards for nearby-place questions, selected-trip comparisons, one-shot location attachment and SOS call options. Chat context stays in memory, not browser storage; clearing the UI does not immediately delete the expiring server context. Frontend integration is an initial version, not a production emergency service.
 
-[![SafeHer demo featuring Plan B Coverage and live location sharing.](docs/media/safeher-demo-plan-b-and-live-sharing-poster.jpg)](docs/media/safeher-demo-plan-b-and-live-sharing.mp4)
+## Latest demo · HerSide Q&A + Plan B + live sharing
 
-**[Watch the Plan B + live sharing demo](docs/media/safeher-demo-plan-b-and-live-sharing.mp4)**: the walkthrough plus a live-sharing chapter, then Plan B route comparisons, departure-time changes, coverage-gap highlighting and least-covered-point focus. It uses real API calculations and a labelled cached OSM map.
+[![SafeHer with HerSide pre-trip comparison of walking time, lighting evidence and route support.](docs/media/safeher-demo-herside-poster.jpg)](docs/media/safeher-demo-herside.mp4)
+
+**[Watch the latest captioned demo](docs/media/safeher-demo-herside.mp4)** — 4:54, 1440×900, approximately 41 MB. It covers:
+- Delhi walking-route comparison, transparent signals and changing departure times
+- Plan B estimates, coverage gaps and uncertainty
+- Opt-in live sharing, recipient view, simulated movement and revoking the link
+- **HerSide pre-trip Q&A powered by local Ollama**: whether extra walking time is worth better lighting evidence and fewer weak stretches
+- Model-independent SOS and explicit, one-shot chatbot location consent
+
+The pre-trip question uses a reviewed structured trip attachment, not user-typed coordinates; computed route results are not mocked. Sharing GPS is simulated and labelled. The recording uses a labelled cached OSM map. Only the latest recorder, video and poster are kept; earlier versions remain in Git history.
+
+Recording instructions: [demo/README.md](demo/README.md).
 
 ## Features
 1. Map with up to three SafeHer routes plus Google's, each scored
@@ -100,6 +107,9 @@ More: [Architecture](docs/ARCHITECTURE.md) (data sources and the full request fl
 7. Community hazard reporting
 8. Opt-in live location sharing (web, foreground only; expiring viewer link)
 9. Night map: NASA night-light glow, lit streets and mapped street lamps
+10. **HerSide** chat companion (Google ADK agents on local Ollama or Gemini): nearby help, selected-trip trade-offs, one-shot location, SOS
+
+General multilingual Q&A and the aggregated H3 hotspot dashboard are **planned, not implemented**.
 
 ## Plan B Coverage
 
@@ -144,10 +154,10 @@ Or set `SAFEHER_LLM=ollama` and `OLLAMA_MODEL` in `backend/.env`. Answers go thr
 ## Tests
 From `backend/`: `.venv/bin/pytest` runs about 300 tests: unit, API, data integrity, random trips across both cities, fuzzing, and the web app in headless Chromium (run `.venv/bin/python -m playwright install chromium` once). Tests that need the data skip until it's built, and real API keys are hidden from tests unless `SAFEHER_LIVE_GOOGLE=1`.
 
-Heavier runs: `SAFEHER_FUZZ_EXAMPLES=1000 .venv/bin/pytest tests/test_fuzz.py`, `SAFEHER_SEED=<n> SAFEHER_TRIPS=5 .venv/bin/pytest tests/test_random_trips.py`. Load test against a running server: `.venv/bin/python -m tests.tools.load_test --users 40 --seconds 60`.
+HerSide's browser tests run separately: `RUN_BROWSER_TESTS=1 .venv/bin/pytest tests/test_chatbot_ui.py`. Heavier runs: `SAFEHER_FUZZ_EXAMPLES=1000 .venv/bin/pytest tests/test_fuzz.py`, `SAFEHER_SEED=<n> SAFEHER_TRIPS=5 .venv/bin/pytest tests/test_random_trips.py`. Load test against a running server: `.venv/bin/python -m tests.tools.load_test --users 40 --seconds 60`.
 
 ### Record the demo video
-With the server running: `backend/.venv/bin/python -m playwright install chromium` (once), then `backend/.venv/bin/python demo/record_demo.py` → `demo/out/safeher-demo.mp4` (≈2½ min, captioned). Add `--headed` to watch it record. More recorders in [demo/README.md](demo/README.md).
+With SafeHer and Ollama running, from the repository root: `backend/.venv/bin/python demo/record_demo.py --base http://localhost:8765` → `docs/media/safeher-demo-herside.mp4`. Requires Chrome, ffmpeg and cached MapLibre assets; see [demo/README.md](demo/README.md). Add `--headed` to watch.
 
 ## Planned stack
 Flutter · Google Maps Platform (Maps SDK, Routes, Places) · Gemini API / Vertex AI · Firebase (Auth, Firestore, FCM) · Cloud Run · BigQuery GIS

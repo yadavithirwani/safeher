@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import trips
+from .chatbot.service import router as chatbot_router
 from . import signals as sig
 from . import config, google, store, userdb
 from .cities import CITIES, Unsupported, city_at, corridor, supported_list
@@ -73,6 +74,7 @@ async def lifespan(app):
 
 app = FastAPI(title="SafeHer API", version="0.1.0", lifespan=lifespan)
 app.include_router(trips.router)
+app.include_router(chatbot_router)
 
 
 @app.middleware("http")
@@ -81,7 +83,8 @@ async def revalidate_web_assets(request, call_next):
     response = await call_next(request)
     if request.url.path == "/" or request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache"
-    if request.url.path.startswith("/api/trips") or request.url.path == "/live":
+    if (request.url.path.startswith(("/api/trips", "/api/chat"))
+            or request.url.path == "/live"):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
     return response

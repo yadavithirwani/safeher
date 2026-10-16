@@ -1,0 +1,42 @@
+/* HerSide is intentionally isolated from the route panel styling. */
+#chatbotBtn { min-height: 44px; border: 1px solid var(--primary); border-radius: 12px; background: var(--primary); color: var(--surface); padding: 10px 14px; font-weight: 700; }
+.sharing-launch { display: flex; gap: 8px; flex-wrap: wrap; }
+.herside { width: min(540px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 1px solid var(--border); border-radius: 20px; color: var(--text); background: var(--surface); box-shadow: var(--shadow-lg); }
+.herside[open] { display: flex; flex-direction: column; }
+.herside::backdrop { background: rgb(0 0 0 / 50%); }
+.herside button, .herside a { min-height: 44px; }
+.herside button { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; background: var(--surface-2); color: var(--text); }
+.herside button:disabled { opacity: .6; cursor: wait; }
+.herside-head { display: flex; justify-content: space-between; align-items: center; padding: 16px; gap: 12px; border-bottom: 1px solid var(--border); }
+.herside h2 { margin: 0; font-size: 22px; }
+.herside-head p { margin: 3px 0 0; font-size: 13px; color: var(--text-2); }
+.herside-notice { margin: 12px 16px; font-size: 12px; color: var(--text-2); }
+.herside-emergency { display: flex; align-items: center; margin: 0 16px 8px; padding: 8px 12px; color: #a81919; background: #fff0f0; border-radius: 10px; font-weight: 700; }
+.herside-prompts { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 10px; }
+.herside-messages { min-height: 100px; height: min(32dvh, 300px); overflow-y: auto; overscroll-behavior: contain; padding: 12px 16px; border-block: 1px solid var(--border); }
+.herside-message { margin: 0 0 12px; padding: 12px; border-radius: 12px; background: var(--surface-2); overflow-wrap: anywhere; }
+.herside-message[data-speaker="You"] { background: var(--primary-soft); margin-left: 28px; }
+.herside-message strong { display: block; margin-bottom: 4px; }
+.herside-message p { margin: 6px 0; white-space: pre-wrap; }
+.herside-card { margin-top: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; }
+.herside-card small { display: block; color: var(--text-2); }
+.herside-card button, .herside-card a { display: inline-flex; align-items: center; margin: 6px 6px 0 0; }
+.herside-card a { color: var(--primary); }
+.herside-message ul { padding-left: 20px; font-size: 12px; }
+.herside-status { min-height: 20px; margin: 6px 16px; font-size: 13px; color: var(--text-2); }
+.herside-location { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 0 16px 8px; font-size: 12px; }
+.herside-location span { width: 100%; color: var(--text-2); }
+.herside-compose { padding: 0 16px; }
+.herside-compose label { display: block; font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+.herside-compose > div { display: flex; gap: 8px; }
+.herside textarea { font: inherit; color: var(--text); background: var(--surface); width: 100%; min-height: 60px; max-height: 120px; resize: vertical; border: 1px solid var(--text-2); border-radius: 10px; padding: 10px; }
+.herside #chatbotSend { background: var(--primary); color: var(--surface); border-color: var(--primary); }
+.herside-footer { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 16px; font-size: 11px; color: var(--text-2); }
+@media (max-width: 600px) {
+  .herside { width: calc(100vw - 12px); max-height: calc(100dvh - 12px); border-radius: 14px; }
+  .herside-head { padding: 12px; }
+  .herside-messages { height: 24dvh; }
+  .herside-notice { margin-block: 8px; }
+  .herside-prompts { gap: 4px; }
+}
+@media (prefers-reduced-motion: reduce) { .herside * { scroll-behavior: auto !important; } }

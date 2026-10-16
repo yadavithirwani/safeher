@@ -1,45 +1,36 @@
-# Demo recordings
+# Record the latest SafeHer demo
 
-The original `record_demo.py`, `docs/media/safeher-demo.mp4`, and its poster are preserved.
+`record_demo.py` is the only recorder. It records the current UI from scratch—no previous video is needed—and publishes:
 
-## Latest demo: Plan B Coverage + live sharing
+- `docs/media/safeher-demo-herside.mp4`
+- `docs/media/safeher-demo-herside-poster.jpg`
 
-`record_demo_plan_b.py` appends a newly recorded Plan B chapter to the live-sharing demo as a separate third version:
+## Requirements and command
 
-- `docs/media/safeher-demo-plan-b-and-live-sharing.mp4`
-- `docs/media/safeher-demo-plan-b-and-live-sharing-poster.jpg`
-
-It shows real API-derived coverage estimates, changes departure to 11:45 PM, compares Shortest and Alternative routes, highlights gaps, focuses the least-covered sampled point, and explains uncertainty. No GPS access or new sharing sessions are needed for this chapter. The cached-map approach and requirements below also apply. Earlier videos and recorders are not modified.
+Start SafeHer, Ollama with the tool-capable `llama3.2:3b` model, (Google Places credentials are only needed for optional nearby-place tools). Install Chrome and system ffmpeg. Use the repository virtual environment (Playwright and NetworkX are required).
 
 ```bash
-# From repo root, with the server running and cached MapLibre assets available:
-.venv/bin/python demo/record_demo_plan_b.py
-```
-
-Add `--headed` to watch. Existing outputs are never overwritten; use a new `NAME` for future revisions.
-
-## Updated demo: live sharing
-
-`record_demo_live.py` records a new live-sharing chapter and appends it to the original footage in a **new** file:
-
-- `docs/media/safeher-demo-live-sharing.mp4`
-- `docs/media/safeher-demo-live-sharing-poster.jpg`
-
-The chapter demonstrates opt-in sharing, the recipient map, simulated movement, foreground limitations, and revocation. GPS is Playwright-simulated; no actual device location is used. Created sessions are revoked in cleanup. No reports are submitted. Captions are burned into the silent video, matching the original format.
-
-The new chapter uses a clearly labelled OpenStreetMap street map drawn from the default Delhi trip's streets in `data/safeher.duckdb` (build it first: `python -m safeher.data build`), because external basemaps can be blocked on corporate networks. This is recording-only request interception, not a change to the app. MapLibre assets are cached in ignored `demo/out/assets/`; fonts use system fallbacks. The app’s real API and GPS-watch workflow remain in use.
-
-From the repository root, with SafeHer running on localhost:8765:
-
-```bash
-# Requires project Playwright, Google Chrome, and system ffmpeg.
-.venv/bin/python -m playwright install ffmpeg
+# From the repository root:
 mkdir -p demo/out/assets
 curl -fL https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js -o demo/out/assets/maplibre.js
 curl -fL https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css -o demo/out/assets/maplibre.css
-.venv/bin/python demo/record_demo_live.py
+backend/.venv/bin/python demo/record_demo.py --base http://localhost:8765
 ```
 
-If downloads need the corporate proxy, prepend `HTTP_PROXY=http://sysproxy.wal-mart.com:8080 HTTPS_PROXY=http://sysproxy.wal-mart.com:8080` to the download command. Add `--headed` to watch recording.
+Add `--headed` to watch. Needs the data built first (`python -m safeher.data build`): the cached street map is drawn from each city's default-trip corridor in `data/safeher.duckdb`. If downloads need a proxy, set `HTTP_PROXY`/`HTTPS_PROXY` for curl.
 
-The recorder refuses to overwrite existing updated outputs. To record another revision, change `NAME` to a new filename. Temporary raw footage is removed automatically; the old published MP4 is read-only input to concatenation.
+## Walkthrough and authenticity
+
+The silent, captioned video covers routes/time-dependent evidence, Plan B route comparisons and gaps, opt-in live sharing including recipient movement/revocation, then HerSide Q&A and model-independent SOS.
+
+The recorded question is:
+
+> For this walk, is the extra walking time worth it for better lighting and fewer weak stretches?
+
+The recorder clicks **Compare my selected trip** to attach origin, destination and departure as structured context; the user reviews a normal question, place labels and departure, not coordinate text. Ollama/ADK selects the pre-trip comparison tool. The backend recomputes the real plan and renders the measured extra minutes, support/lighting scores, confidence and weak-stretch counts. No model-generated facts or route fixtures are substituted. This question passed three consecutive live Ollama checks before recording; future responses can vary.
+
+Publication requires a real pre-trip response with at least two routes and the measured trade-off. Failed runs do not replace the previous video. The comparison is explicitly not a guarantee of safety.
+
+Only map assets are intercepted: cached MapLibre and an OSM walking-graph street map avoid external tile outages. Sharing GPS is Playwright-simulated and visibly labelled, never a real person's position. Sharing sessions are revoked in cleanup. No reports are submitted, no calls are placed, and no Google results are plotted on the OSM basemap.
+
+Temporary video is removed automatically. The MP4 is encoded and fully decoded for validation before replacing the published video; failed runs leave the previous output untouched. The new poster comes from the actual HerSide results screen. Keep only this recorder/video/poster; previous versions are available in Git history.

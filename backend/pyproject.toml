@@ -2,7 +2,7 @@
 name = "safeher-backend"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["fastapi", "uvicorn[standard]", "httpx", "astral", "osmnx>=2.0", "opening-hours-py", "numpy", "blackmarblepy", "python-dotenv", "timezonefinder", "duckdb", "osmium"]
+dependencies = ["fastapi", "uvicorn[standard]", "httpx", "astral", "osmnx>=2.0", "opening-hours-py", "numpy", "blackmarblepy", "python-dotenv", "duckdb", "osmium", "google-adk==2.12.0", "litellm==1.105.1", "truststore==0.10.5"]
 
 [project.optional-dependencies]
 dev = ["pytest", "playwright", "imageio-ffmpeg", "hypothesis"]
@@ -11,5 +11,5 @@ dev = ["pytest", "playwright", "imageio-ffmpeg", "hypothesis"]
 testpaths = ["tests"]
 pythonpath = ["."]
 
-[tool.setuptools]
-packages = ["safeher"]
+[tool.setuptools.packages.find]
+include = ["safeher*"]
