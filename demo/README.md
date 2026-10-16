@@ -17,11 +17,17 @@ curl -fL https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css -o demo
 backend/.venv/bin/python demo/record_demo.py --base http://localhost:8765
 ```
 
+The recording server should run with `GOOGLE_MAPS_API_KEY=` (the cached OSM map, as labelled in the video) and, unless a working Gemini key is available, `SAFEHER_LLM=template` so the explanation panel shows the fact-based summary rather than a provider error:
+
+```bash
+cd backend && GOOGLE_MAPS_API_KEY= SAFEHER_LLM=template .venv/bin/uvicorn safeher.api:app --port 8765 --workers 2 --no-access-log
+```
+
 Add `--headed` to watch. Needs the data built first (`python -m safeher.data build`): the cached street map is drawn from each city's default-trip corridor in `data/safeher.duckdb`. If downloads need a proxy, set `HTTP_PROXY`/`HTTPS_PROXY` for curl.
 
 ## Walkthrough and authenticity
 
-The silent, captioned video covers routes/time-dependent evidence, Plan B route comparisons and gaps, opt-in live sharing including recipient movement/revocation, then HerSide Q&A and model-independent SOS.
+The silent, captioned video covers routes/time-dependent evidence, whole-city coverage (city switch, city-wide search, NASA night lights, Bengaluru police context, unsupported-city message), Plan B route comparisons and gaps, opt-in live sharing including recipient movement/revocation, then HerSide Q&A and model-independent SOS.
 
 The recorded question is:
 

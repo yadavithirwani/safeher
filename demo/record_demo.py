@@ -160,8 +160,6 @@ def style():
     ]}
 
 def configure(context, cache: Path, map_style):
-    context.route("https://fonts.googleapis.com/**", lambda route: route.abort())
-    context.route("https://fonts.gstatic.com/**", lambda route: route.abort())
     context.route("https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js",
                   lambda route: route.fulfill(path=str(cache / "maplibre.js"), content_type="application/javascript"))
     context.route("https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css",
@@ -293,14 +291,16 @@ def chapter(demo):
 
 
 def type_and_pick(demo, box: str, text: str, expect: str) -> None:
-    """Type into a search box like a person, then click the suggestion that contains `expect`."""
+    """Type into a search box like a person, then click the suggestion whose text contains `expect`
+    (e.g. a neighbourhood, so a same-named place elsewhere is never picked)."""
     page = demo.page
     demo.click(box, pause=.3)
     page.keyboard.type(text, delay=70)
-    hit = page.locator("li[data-i]", has_text=expect).first
-    hit.wait_for(timeout=15000)
+    page.locator("li[data-i]", has_text=expect).first.wait_for(timeout=15000)
     demo.wait(1.2)
+    before = page.evaluate("state.planSeq")
     demo.click(f"li[data-i]:has-text(\"{expect}\")", pause=.4)
+    page.wait_for_function("(n) => state.planSeq > n", arg=before)
     demo.wait_for_plan(extra=1)
 
 
@@ -315,9 +315,9 @@ def city_chapter(demo):
     demo.wait_for_plan(extra=1.5)
     demo.caption("Switch city in one tap. Bengaluru at <b>9:30 PM</b>: Indiranagar Metro → MG Road Metro.", 4)
 
-    type_and_pick(demo, "#originInput", "Toit", "Toit")
+    type_and_pick(demo, "#originInput", "Toit", "Old Binnamangala")
     demo.caption("Search finds any named place: pubs, cafés, monuments, neighbourhoods and streets, with its <b>area</b>.", 3)
-    type_and_pick(demo, "#destInput", "Bob's Bar", "Bob's Bar")
+    type_and_pick(demo, "#destInput", "Bob's Bar", "Doopanahalli")
     routes = page.evaluate("state.plan.routes.length")
     assert routes >= 2, "Expected real alternatives for Toit → Bob's Bar"
     demo.caption(f"Toit → Bob's Bar: <b>{routes} routes</b> compared on the same five signals.", 4)
@@ -343,10 +343,13 @@ def city_chapter(demo):
 
     page.goto(f"{BASE}/#city=bengaluru&o=19.07600,72.87770,Mumbai&d=19.08200,72.88300,Mumbai%2520destination&t=1290",
               wait_until="domcontentloaded")
+    page.reload(wait_until="domcontentloaded")  # a hash-only change doesn't reload the app
     demo.overlay()
     page.locator("#view .error").wait_for(timeout=20000)
     assert "Delhi and Bengaluru" in page.locator("#view .error").inner_text()
     demo.caption("Outside the two cities, SafeHer says so plainly. <b>No guessed scores</b> where there is no data.", 5)
+    # Leave the page: the next chapter's URL differs only after '#', which wouldn't reload the app.
+    page.goto("about:blank")
 
 
 def routes_chapter(demo):

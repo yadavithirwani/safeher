@@ -86,8 +86,9 @@ Initial Google ADK supervisor/specialist agents and `POST /api/chat` are impleme
 
 [![SafeHer with HerSide pre-trip comparison of walking time, lighting evidence and route support.](docs/media/safeher-demo-herside-poster.jpg)](docs/media/safeher-demo-herside.mp4)
 
-**[Watch the latest captioned demo](docs/media/safeher-demo-herside.mp4)** — 4:54, 1440×900, approximately 41 MB. It covers:
+**[Watch the latest captioned demo](docs/media/safeher-demo-herside.mp4)** — 6:20, 1440×900, approximately 52 MB. It covers:
 - Delhi walking-route comparison, transparent signals and changing departure times
+- **Whole-city coverage**: switching to Bengaluru, searching any place (Toit → Bob's Bar), the night map with NASA night lights, lit streets and lamps, Bengaluru police figures as context, and the clear message outside the two cities
 - Plan B estimates, coverage gaps and uncertainty
 - Opt-in live sharing, recipient view, simulated movement and revoking the link
 - **HerSide pre-trip Q&A powered by local Ollama**: whether extra walking time is worth better lighting evidence and fewer weak stretches
