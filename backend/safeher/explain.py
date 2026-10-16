@@ -1,13 +1,13 @@
 """Plain-language route explanations, grounded only in the computed plan (design spec §5.4).
 
-Providers (SAFEHER_LLM=auto, the default, tries Gemini and then the template):
+Providers (SAFEHER_LLM=auto, the default, uses Gemini when GEMINI_API_KEY is set):
   - Gemini      — needs GEMINI_API_KEY in backend/.env (free key from Google AI Studio)
   - Ollama      — opt-in with SAFEHER_LLM=ollama; local model OLLAMA_MODEL (default phi3:mini)
-  - Template    — deterministic sentences built from the same facts; always available
+  - Template    — deterministic sentences built from the same facts; used when no model is configured
 
 Every model answer goes through `check()` before it is shown. A failing answer gets one retry with
-the problems listed; if it still fails, the next provider is used. The template is last because it
-is faithful by construction, so the user always gets an explanation that only states facts.
+the problems listed. If a configured model fails (error, quota, or the checks twice) the request
+fails with the reason: there is no silent fallback to the template.
 """
 
 from __future__ import annotations

@@ -6,6 +6,72 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 
 > SafeHer helps you make safer, better-informed decisions. It does not guarantee safety. In an emergency, call **112**.
 
+## Quickstart
+
+### What you need
+
+| | Needed for | Where to get it |
+|---|---|---|
+| **Python 3.11+** and ~2 GB free disk | everything | python.org or `brew install python` |
+| **NASA Earthdata token** (free) | building the data (night lights) | Sign up at [urs.earthdata.nasa.gov](https://urs.earthdata.nasa.gov) → *Generate Token*. Then sign in once at [ladsweb.modaps.eosdis.nasa.gov](https://ladsweb.modaps.eosdis.nasa.gov) with the same account and accept the data licence, or downloads are redirected to the licence page. |
+| Google Maps API key *(optional)* | Google basemap, search suggestions, live "open now", Google route comparison, Street View | [Google Cloud console](https://console.cloud.google.com/google/maps-apis): create a project with billing, enable **Map Tiles API, Places API (New), Routes API, Street View Static API**, create a key and restrict it to those APIs. |
+| Gemini API key *(optional)* | plain-language route explanations | [Google AI Studio](https://aistudio.google.com/apikey) (free tier). |
+
+Without the optional keys the app runs fully on open data: a CARTO basemap (OpenStreetMap data), local search, and a fact-based summary instead of Gemini's explanation. A key that **is** set but fails (wrong, out of quota, API not enabled) is shown as an error, never silently replaced.
+
+### 1 · Install
+```bash
+git clone https://github.com/yadavithirwani/safeher.git && cd safeher/backend
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+cp .env.example .env    # then paste your keys into backend/.env (gitignored; never commit it)
+```
+
+### 2 · Build the data (once, ~5–10 min)
+```bash
+.venv/bin/python -m safeher.data build
+```
+This downloads everything SafeHer needs into one file, `data/safeher.duckdb` (~145 MB, gitignored):
+
+| Source | Download | What's kept |
+|---|---|---|
+| [Geofabrik](https://download.geofabrik.de/asia/india/) OpenStreetMap extracts (northern + southern zone) | ~780 MB, checksum-verified, cached in `data/raw/` | Walkable streets (Delhi ~1.0 M segments, Bengaluru ~0.6 M), 84 k places, street lamps, district boundaries |
+| NASA Black Marble VNP46A4 (needs the Earthdata token) | ~380 MB, cached in `data/raw/` | Night-light brightness, ~460 m pixels, for both cities |
+| NCRB crimes against women, via [India Data Portal](https://indiadataportal.com) | ~1 MB | Delhi police-district figures (public-space offences, 2019/21/22) |
+
+The new database is swapped in only if every check passes. Check what you have with `.venv/bin/python -m safeher.data info`; rebuild one city with `--city delhi`.
+
+### 3 · Run
+```bash
+.venv/bin/uvicorn safeher.api:app --port 8765 --workers 4 --no-access-log
+```
+Open http://localhost:8765. Optional checks: `.venv/bin/python -m safeher.google_check` tests every Google API with your key; `.venv/bin/pytest` runs the tests (below).
+
+Walks work anywhere inside **Delhi and Bengaluru**, up to 8 km. A trip elsewhere, or across the two cities, gets a clear message.
+
+### Configuration
+Everything city- or model-specific lives in `config/`, not in code:
+- `cities.json`: supported cities (bbox, landmarks, default trip), data sources, OSM → NCRB district mapping. Add a city with one entry and a rebuild.
+- `scoring.json`: the published scoring model (weights, thresholds, routing limits).
+- `app.json`: app defaults (default city, departure time, trip limits, helplines, basemaps, languages).
+
+Secrets and machine settings go in `backend/.env` (see [`.env.example`](backend/.env.example)).
+
+## How it works
+
+![Data sources: four fetched once into DuckDB by the build; Google Maps and Gemini called live; reports and live sharing in SQLite.](docs/architecture/data-sources.svg)
+
+A trip is planned on a **corridor** (both points plus 1.2 km) cut from the city's data in DuckDB and cached in memory. SafeHer finds up to three distinct walking routes (shortest, most support, an alternative), adds Google's walking route when Google is on, and scores every ~50 m on five signals at your departure time:
+
+1. **Lighting:** OSM `lit` tags and mapped lamps, NASA night lights where those are missing, else an estimate from road type
+2. **Transit:** distance to bus, metro and rail stops
+3. **Safe spaces:** police, hospitals, pharmacies and shops likely open at that time
+4. **Historical incidents:** NCRB police-district figures (Delhi only; low confidence)
+5. **Community reports:** recent reports from people using SafeHer
+
+Each signal carries a confidence, and missing data is never scored as bad. Gemini then explains the result in plain language; its answer is fact-checked against the plan before it is shown.
+
+More: [Architecture](docs/ARCHITECTURE.md) (data sources and the full request flow) · [Design spec](docs/DESIGN_SPEC.md) (product, scoring model, decision log).
+
 ## Demo
 
 [![SafeHer demo: Hauz Khas Metro to Select Citywalk, Delhi, at 9:30 PM. Click to play the video.](docs/media/demo-poster.jpg)](docs/media/safeher-demo.mp4)
@@ -23,6 +89,17 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 
 **[Watch the Plan B + live sharing demo](docs/media/safeher-demo-plan-b-and-live-sharing.mp4)**: the walkthrough plus a live-sharing chapter, then Plan B route comparisons, departure-time changes, coverage-gap highlighting and least-covered-point focus. It uses real API calculations and a labelled cached OSM map.
 
+## Features
+1. Map with up to three SafeHer routes plus Google's, each scored
+2. Transparent, rule-based safety score with a per-signal breakdown
+3. Five data signals: lighting · transit proximity · safe spaces · historical incidents · community reports
+4. Gemini route explanation in English or Hindi, fact-checked
+5. Safe stops: nearest police station, washroom, hospital, pharmacy and open places
+6. Plan B coverage: how far you'd be from a likely-open help point along the route
+7. Community hazard reporting
+8. Opt-in live location sharing (web, foreground only; expiring viewer link)
+9. Night map: NASA night-light glow, lit streets and mapped street lamps
+
 ## Plan B Coverage
 
 Route cards now show a separate **Plan B Coverage** estimate: the longest sampled walk to a potentially available help point, route share within five minutes, and clickable coverage gaps. It does not change safety scores or route ranking.
@@ -36,37 +113,6 @@ Route cards now show a separate **Plan B Coverage** estimate: the longest sample
 
 Tests: `cd backend && .venv/bin/pytest tests/test_backup.py`.
 
-## MVP features
-1. Map with 2–3 candidate routes
-2. Transparent, rule-based safety score
-3. Five data signals: lighting · transit proximity · verified safe spaces · historical anonymised incidents · recent community reports
-4. Gemini route explanation and multilingual Q&A
-5. Safe stops: nearest police station, closest washroom, well-lit places along the route
-6. Community hazard reporting
-7. Opt-in live location sharing (web foreground-only; expiring viewer link)
-8. Aggregated, privacy-preserving hotspot dashboard
-
-## Run the demo
-```bash
-cd backend
-python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m safeher.data build   # once: Delhi + Bengaluru → data/safeher.duckdb (~145 MB)
-.venv/bin/uvicorn safeher.api:app --port 8765 --workers 4 --no-access-log
-```
-Open http://localhost:8765.
-
-Settings live in `config/`: supported cities, landmarks and data sources (`cities.json`), the published scoring model (`scoring.json`) and app defaults such as the opening time, trip limits and helplines (`app.json`). The build downloads the Geofabrik OpenStreetMap extracts, NASA night lights (needs `EARTHDATA_TOKEN` in `backend/.env`) and NCRB figures into one DuckDB file; add a city with one entry in `cities.json` and a rebuild. Walks work anywhere inside Delhi and Bengaluru; elsewhere the app says so.
-
-**Google Maps Platform (optional).** Put `GOOGLE_MAPS_API_KEY=...` in `backend/.env` (Cloud project with billing; enable Map Tiles API, Places API (New), Routes API, Street View Static API) to switch on the Google basemap, Google search, live "open now", Google route comparison and Street View. Check every API with `.venv/bin/python -m safeher.google_check`. Without a key everything runs on open data.
-
-Route explanations use **Gemini** when `GEMINI_API_KEY=...` is set in `backend/.env` (free key from [Google AI Studio](https://aistudio.google.com/apikey); never commit it). Without a key, a fact-checked template is used. Run the tests with `.venv/bin/pytest`.
-
-### Tests
-From `backend/`: `.venv/bin/pytest` (unit, API, data integrity, random trips, fuzzing, and the web app in headless Chromium; needs `.venv/bin/python -m playwright install chromium` once). Heavier runs: `SAFEHER_FUZZ_EXAMPLES=1000 .venv/bin/pytest tests/test_fuzz.py`, `SAFEHER_SEED=<n> SAFEHER_TRIPS=5 .venv/bin/pytest tests/test_random_trips.py`. Load test against a running server: `.venv/bin/python -m tests.tools.load_test --users 40 --seconds 60`.
-
-### Record the demo video
-With the server running: `backend/.venv/bin/python -m playwright install chromium` (once), then `backend/.venv/bin/python demo/record_demo.py` → `demo/out/safeher-demo.mp4` (≈2½ min, captioned). Add `--headed` to watch it record.
-
 ## Live location sharing (foreground MVP)
 
 Click **Share live location → Start sharing**, grant browser location permission, and copy the viewer link to a trusted contact. The viewer opens a standalone map without installing an app. Only the latest GPS point, its accuracy, server receipt time, and the route selected at session creation are stored. No location history or LLM processing is involved.
@@ -75,7 +121,7 @@ Click **Share live location → Start sharing**, grant browser location permissi
 - Viewer polls every 5 seconds and marks updates older than 30 seconds **STALE**. It shows GPS accuracy, not guaranteed precision or a live ETA.
 - Sessions expire after **two hours**. **Stop sharing** clears GPS tracking and deletes the session. If revocation fails offline, the UI warns and lets you retry; the server retains the last point until expiry.
 - Reload recovery stores owner credentials in the sender tab’s session storage; resuming GPS requires an explicit click. Closing the tab does not immediately revoke a link. Stop before closing.
-- Separate random owner/viewer credentials; only hashed credentials are stored in SQLite (`backend/var/trips.sqlite3`). Anyone holding a viewer link can view it. Do not publish links or log request paths. Use `--no-access-log`; production proxies/APM must also redact `/api/trips/*` paths and request bodies.
+- Separate random owner/viewer credentials; only hashed credentials are stored in SQLite (`backend/var/safeher.sqlite3`). Anyone holding a viewer link can view it. Do not publish links or log request paths. Use `--no-access-log`; production proxies/APM must also redact `/api/trips/*` paths and request bodies.
 - Expired data is purged at most a minute after expiry while the server runs, and on subsequent database access. Stopped data is deleted immediately; secure deletion is enabled. Database backups or recipient screenshots are outside this prototype’s deletion control.
 - GPS works on **localhost or HTTPS**. A localhost link works only on this computer: phone/contact testing needs a reachable HTTPS deployment. Do not use an HTTP LAN IP for GPS.
 - Public deployment still needs per-client abuse/rate controls, HTTPS, security review, and device testing. The prototype caps active sessions at 1,000 but is not production-hardened.
@@ -85,29 +131,35 @@ Run isolated API regressions from `backend/`: `.venv/bin/pytest tests/test_trips
 
 ### Local Ollama explanations
 
-Ollama is supported independently of sharing. With Ollama running locally and a model installed:
+Explanations can come from a local Ollama model instead of Gemini:
 
 ```bash
-# Already installed on the development machine: llama3:latest
-ollama list
+ollama list   # e.g. llama3:latest
 SAFEHER_LLM=ollama OLLAMA_MODEL=llama3:latest .venv/bin/uvicorn safeher.api:app --port 8765 --no-access-log
 ```
 
-Alternatively set `SAFEHER_LLM=ollama` and `OLLAMA_MODEL=llama3:latest` in the ignored `backend/.env`. Explanations are validated; rejected/unavailable model answers fall back to the deterministic template. No Gemini calls are made in Ollama mode. Model prompts include planned-route facts, not live GPS updates.
+Or set `SAFEHER_LLM=ollama` and `OLLAMA_MODEL` in `backend/.env`. Answers go through the same fact checks; if the model is unavailable or fails the checks twice, the app shows an error (no silent fallback). No Gemini calls are made in Ollama mode, and prompts include planned-route facts only, never live GPS.
 
-## Docs
-- [Design spec](docs/DESIGN_SPEC.md)
+## Tests
+From `backend/`: `.venv/bin/pytest` runs about 300 tests: unit, API, data integrity, random trips across both cities, fuzzing, and the web app in headless Chromium (run `.venv/bin/python -m playwright install chromium` once). Tests that need the data skip until it's built, and real API keys are hidden from tests unless `SAFEHER_LIVE_GOOGLE=1`.
+
+Heavier runs: `SAFEHER_FUZZ_EXAMPLES=1000 .venv/bin/pytest tests/test_fuzz.py`, `SAFEHER_SEED=<n> SAFEHER_TRIPS=5 .venv/bin/pytest tests/test_random_trips.py`. Load test against a running server: `.venv/bin/python -m tests.tools.load_test --users 40 --seconds 60`.
+
+### Record the demo video
+With the server running: `backend/.venv/bin/python -m playwright install chromium` (once), then `backend/.venv/bin/python demo/record_demo.py` → `demo/out/safeher-demo.mp4` (≈2½ min, captioned). Add `--headed` to watch it record. More recorders in [demo/README.md](demo/README.md).
 
 ## Planned stack
 Flutter · Google Maps Platform (Maps SDK, Routes, Places) · Gemini API / Vertex AI · Firebase (Auth, Firestore, FCM) · Cloud Run · BigQuery GIS
 
 ## Repo layout
 ```
-app/web/    demo web app (MapLibre, served by the API)
-dashboard/  community / authority dashboard (web)
-backend/    Cloud Run API (scoring, Gemini, reports, trips)
-data/       ingestion scripts and pilot-city datasets
-docs/       design spec and decisions
+app/web/     web app (MapLibre), served by the API
+backend/     FastAPI backend: data build, routing, scoring, Gemini, reports, live sharing, tests
+config/      cities, scoring model and app defaults (JSON)
+data/        safeher.duckdb and raw downloads (built locally, gitignored)
+demo/        Playwright demo recorders
+docs/        design spec, architecture diagrams, demo videos
+dashboard/   community / authority dashboard (planned)
 ```
 
 ## Team

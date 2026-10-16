@@ -27,7 +27,7 @@ Add `--headed` to watch. Existing outputs are never overwritten; use a new `NAME
 
 The chapter demonstrates opt-in sharing, the recipient map, simulated movement, foreground limitations, and revocation. GPS is Playwright-simulated; no actual device location is used. Created sessions are revoked in cleanup. No reports are submitted. Captions are burned into the silent video, matching the original format.
 
-The new chapter uses a clearly labelled cached OpenStreetMap street map from the checked-in Delhi walking graph, because external basemaps can be blocked on corporate networks. This is recording-only request interception, not a change to the app. MapLibre assets are cached in ignored `demo/out/assets/`; fonts use system fallbacks. The app’s real API and GPS-watch workflow remain in use.
+The new chapter uses a clearly labelled OpenStreetMap street map drawn from the default Delhi trip's streets in `data/safeher.duckdb` (build it first: `python -m safeher.data build`), because external basemaps can be blocked on corporate networks. This is recording-only request interception, not a change to the app. MapLibre assets are cached in ignored `demo/out/assets/`; fonts use system fallbacks. The app’s real API and GPS-watch workflow remain in use.
 
 From the repository root, with SafeHer running on localhost:8765:
 
