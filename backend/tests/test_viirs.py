@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from safeher import signals as sig
-from safeher.areas import AREAS
-from safeher.viirs import ViirsGrid, grid_path
+from safeher import store
+from safeher.viirs import ViirsGrid
 
 
 @pytest.fixture
@@ -31,14 +31,6 @@ def test_percentile_ranks_within_area(grid):
     assert grid.percentile_at(28.540, 77.210) == 0.0  # darkest
     assert grid.percentile_at(28.545, 77.205) == 1.0  # brightest
     assert 0 < grid.percentile_at(28.540, 77.215) < 1
-
-
-def test_save_and_load_roundtrip(grid, tmp_path):
-    p = tmp_path / "viirs.npz"
-    grid.save(p)
-    back = ViirsGrid.load(p)
-    assert back.year == 2025
-    assert back.radiance_at(28.540, 77.210) == 2.0
 
 
 def test_all_nan_grid_rejected():
@@ -72,28 +64,30 @@ def test_viirs_less_certain_than_lamps_more_than_guess():
     assert guess < viirs < lamps
 
 
-# --- real data (after `python -m safeher.viirs`) --------------------------------------------
-
-DELHI = AREAS["del-hauz-khas-saket"]
+# --- real data (data/safeher.duckdb) -----------------------------------------------------------
 
 
-@pytest.mark.skipif(not grid_path(DELHI).exists(), reason="VIIRS not fetched (needs EARTHDATA_TOKEN)")
+@pytest.mark.skipif(not store.available(), reason="run: python -m safeher.data build")
 def test_deer_park_darker_than_aurobindo_marg():
-    g = ViirsGrid.load(grid_path(DELHI))
+    g = store.night_lights("delhi")
     deer_park = g.radiance_at(28.5527, 77.1985)
     aurobindo_marg = g.radiance_at(28.5434, 77.2066)  # outside Hauz Khas metro
     assert deer_park is not None and aurobindo_marg is not None
     assert deer_park < aurobindo_marg
 
 
-def test_trip_corridor_uses_its_citys_grid(tmp_path, monkeypatch):
-    """Trip areas inside a pre-loaded city get the whole-city night-light grid (city-relative ranks)."""
-    from safeher import citydata, viirs
-    from safeher.areas import Area
-    monkeypatch.setattr(citydata, "OUTPUT_DIR", tmp_path)
-    grid = ViirsGrid(np.array([[10.0, 50.0], [90.0, 30.0]]), np.array([28.55, 28.54]), np.array([77.20, 77.21]), 2025)
-    grid.save(viirs.city_grid_path("delhi"))
-    inside = Area("trip-0123456789", "Trip area", "t", 28.53, 77.19, 28.56, 77.22, "Asia/Kolkata")
-    outside = Area("trip-9876543210", "Trip area", "t", 19.0, 72.8, 19.1, 72.9, "Asia/Kolkata")
-    assert viirs.load_for(inside).radiance_at(28.54, 77.20) == 90.0
-    assert viirs.load_for(outside) is None
+@pytest.mark.skipif(not store.available(), reason="run: python -m safeher.data build")
+def test_corridors_rank_brightness_against_the_whole_city():
+    """A trip corridor uses its city's grid, so 'bright' means bright for the city, not the street."""
+    from safeher.cities import corridor
+    data = store.corridor_data(corridor((28.5433, 77.2067), (28.5286, 77.2195)))
+    assert data.viirs is store.night_lights("delhi")
+    assert data.viirs.radiance.shape[0] > 50  # city-sized, not corridor-sized
+
+
+@pytest.mark.skipif(not store.available(), reason="run: python -m safeher.data build")
+def test_grid_rebuilt_from_rows_matches_every_stored_pixel():
+    rows = store.con().execute("SELECT lat, lon, radiance FROM night_lights WHERE city = 'delhi' "
+                               "USING SAMPLE 200 ROWS").fetchall()
+    g = store.night_lights("delhi")
+    assert all(g.radiance_at(lat, lon) == pytest.approx(v) for lat, lon, v in rows)

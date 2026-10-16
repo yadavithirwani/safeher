@@ -1,7 +1,7 @@
 """Load SafeHer's configuration from the repo's config/ folder.
 
-- config/areas.json    demo areas, landmarks, default trips, timezones
-- config/app.json      default area/departure, helplines, basemaps, languages
+- config/cities.json   supported cities, their data sources, landmarks and default trips
+- config/app.json      default city/departure, trip limits, helplines, basemaps, languages
 - config/scoring.json  the published, versioned scoring model
 
 SAFEHER_CONFIG_DIR points at a different folder (e.g. for tests or another deployment).
@@ -41,9 +41,6 @@ def scoring() -> dict:
 def app() -> dict:
     return load("app")
 
-
-def areas() -> list[dict]:
-    return load("areas")["areas"]
 
 
 def hhmm(value: str) -> time:

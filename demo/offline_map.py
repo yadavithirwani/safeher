@@ -1,4 +1,4 @@
-"""Recording-only map style built from the checked-in OSM walking graph."""
+"""Recording-only map style: the default trip's streets from data/safeher.duckdb."""
 from __future__ import annotations
 
 import sys
@@ -9,9 +9,12 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 
 def style():
-    from safeher.routing import load_area
+    from safeher import config, store
+    from safeher.cities import CITIES, corridor
 
-    graph = load_area("del-hauz-khas-saket").graph
+    city = CITIES[config.app()["default_city"]]
+    o, d = (next(lm for lm in city.landmarks if lm.name == n) for n in city.default_trip)
+    graph = store.corridor_data(corridor((o.lat, o.lon), (d.lat, d.lon))).graph
     features = []
     for u, v, edge in graph.edges(data=True):
         if u > v:

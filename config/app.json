@@ -1,6 +1,5 @@
 {
   "_comment": "App behaviour that isn't scoring. default_departure: \"HH:MM\" opens the app at that local time (good for night demos); null opens at the current time.",
-  "default_area": "del-hauz-khas-saket",
   "default_departure": "21:30",
   "helplines": [
     {
@@ -111,19 +110,6 @@
     "max_routes": 1
   },
   "departure_window_days": 366,
-  "anywhere": {
-    "_comment": "Trips outside the configured areas: street data for the trip corridor is downloaded on first use.",
-    "enabled": true,
-    "max_trip_km": 8,
-    "corridor_margin_m": 1200,
-    "download_workers": 2,
-    "min_nodes": 30,
-    "min_connected_share": 0.9,
-    "stale_download_s": 600,
-    "retry_failed_after_s": 60,
-    "poll_interval_ms": 2000,
-    "google_search_bias_km": 30
-  },
   "gemini": {
     "_comment": "GEMINI_MODEL in backend/.env overrides model. Thinking is kept low: explanations are short and must be fast.",
     "model": "gemini-3.8-flash",
@@ -133,5 +119,12 @@
     "timeout_s": 25,
     "busy_retries": 2,
     "busy_retry_pause_s": 1.5
+  },
+  "default_city": "delhi",
+  "trips": {
+    "_comment": "Walking trips inside one supported city.",
+    "max_trip_km": 8,
+    "corridor_margin_m": 1200,
+    "corridor_cache_size": 24
   }
 }

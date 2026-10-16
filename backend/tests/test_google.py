@@ -8,9 +8,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from safeher import api, google
-from safeher.areas import AREAS
+from safeher import store
+from safeher.cities import CITIES, corridor
 
-DEL = AREAS["del-hauz-khas-saket"]
+DEL = CITIES["delhi"]
+
 HAUZ_KHAS, SAKET = (28.5433, 77.2067), (28.5286, 77.2195)
 
 
@@ -115,7 +117,7 @@ def test_key_is_sent_in_header_and_field_masks_are_set():
     assert "currentOpeningHours.openNow" in fake.requests[1].headers["X-Goog-FieldMask"]
 
 
-def test_autocomplete_is_restricted_to_the_area_and_skips_query_predictions():
+def test_autocomplete_is_restricted_to_the_city_and_skips_query_predictions():
     fake = FakeGoogle()
     out = make_client(fake).autocomplete("toit", (DEL.south, DEL.west, DEL.north, DEL.east), "tok-1")
     body = json.loads(fake.requests[0].content)
@@ -180,7 +182,6 @@ def google_on(monkeypatch, tmp_path):
     def setup(fake: FakeGoogle, features=("map_tiles", "autocomplete", "nearby", "routes", "streetview")):
         monkeypatch.setattr(google, "client", lambda: make_client(fake))
         monkeypatch.setattr(google, "feature", lambda name: name in features)
-        monkeypatch.setattr(api, "REPORTS_FILE", tmp_path / "reports.jsonl")
         api._route_cache.clear(); api._plan_cache.clear()
         return TestClient(api.app)
     return setup
@@ -217,8 +218,7 @@ def test_different_google_route_is_scored_by_our_engine(google_on):
     base = TestClient(api.app).post("/api/plan", json=plan_body()).json()
     # A real street path that SafeHer didn't pick: our route reversed out and back isn't valid, so
     # take the alternative's geometry but shift it off our routes by detouring via a side street.
-    from safeher.routing import load_area
-    data = load_area(DEL.id)
+    data = store.corridor_data(corridor(HAUZ_KHAS, SAKET))
     import networkx as nx
     s = min(data.graph.nodes, key=lambda n: abs(data.node_latlon(n)[0] - HAUZ_KHAS[0]) + abs(data.node_latlon(n)[1] - HAUZ_KHAS[1]))
     t = min(data.graph.nodes, key=lambda n: abs(data.node_latlon(n)[0] - SAKET[0]) + abs(data.node_latlon(n)[1] - SAKET[1]))
@@ -244,7 +244,7 @@ def test_google_route_leaving_the_area_is_not_scored(google_on):
     c = google_on(FakeGoogle(routes=[[HAUZ_KHAS, (28.60, 77.25), SAKET]]))
     p = c.post("/api/plan", json=plan_body()).json()
     assert all(r["source"] == "safeher" for r in p["routes"])
-    assert any("leaves the demo area" in n for n in p["data_notes"])
+    assert any("leaves this trip's street data" in n for n in p["data_notes"])
 
 
 def test_nearby_uses_live_google_hours_for_trips_leaving_now(google_on):
@@ -273,23 +273,23 @@ def test_nearby_google_failure_is_an_error(google_on):
 
 def test_search_google_failure_is_an_error(google_on):
     c = google_on(FakeGoogle(status=403))
-    r = c.get("/api/search", params={"q": "toit", "area": DEL.id})
+    r = c.get("/api/search", params={"q": "toit", "city": DEL.id})
     assert r.status_code == 502 and "Google search failed" in r.json()["detail"]
 
 
 def test_search_adds_google_predictions_after_local_results(google_on):
     c = google_on(FakeGoogle())
-    r = c.get("/api/search", params={"q": "toit", "area": DEL.id, "session": "tok"}).json()
+    r = c.get("/api/search", params={"q": "toit", "city": DEL.id, "session": "tok"}).json()
     g = [x for x in r if x.get("source") == "google"]
     assert g and g[0]["place_id"] and "Google" in g[0]["detail"]
     assert "lat" not in g[0]  # coordinates only come from Place Details when chosen
 
 
-def test_place_anywhere_is_returned_with_its_area_if_known(google_on):
+def test_place_is_returned_with_its_city_and_refused_outside_supported_cities(google_on):
     c = google_on(FakeGoogle())
-    assert c.get("/api/google/place/ChIJ_test_place_DEL").json()["area"] == DEL.id
+    assert c.get("/api/google/place/ChIJ_test_place_DEL").json()["city_id"] == DEL.id
     r = c.get("/api/google/place/ChIJ_test_place_MUM")
-    assert r.status_code == 200 and r.json()["area"] is None  # go-anywhere: Mumbai is fine, just no demo area
+    assert r.status_code == 422 and "Delhi and Bengaluru" in r.json()["detail"]
 
 
 def test_tiles_and_images_are_proxied_without_caching(google_on):
@@ -329,7 +329,7 @@ def test_unsafe_session_token_is_dropped_not_sent(google_on):
     """Found with the live API: Google rejects session tokens that aren't URL-safe base64."""
     fake = FakeGoogle()
     c = google_on(fake)
-    r = c.get("/api/search", params={"q": "toit", "area": DEL.id, "session": "has spaces!"}).json()
+    r = c.get("/api/search", params={"q": "toit", "city": DEL.id, "session": "has spaces!"}).json()
     assert any(x.get("source") == "google" for x in r)
     body = json.loads(next(q for q in fake.requests if "autocomplete" in str(q.url)).content)
     assert "sessionToken" not in body

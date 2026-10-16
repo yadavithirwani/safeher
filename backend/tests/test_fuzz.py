@@ -10,21 +10,17 @@ from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from safeher import api, trips
-from safeher.areas import AREAS
+from safeher import api, store
+from safeher.cities import CITIES
 
-pytestmark = pytest.mark.skipif(
-    not all((a.dir / "walk.graphml").exists() for a in AREAS.values()), reason="OSM snapshots not fetched")
+pytestmark = pytest.mark.skipif(not store.available(), reason="run: python -m safeher.data build")
 
 EXAMPLES = int(__import__("os").environ.get("SAFEHER_FUZZ_EXAMPLES", "120"))
 FUZZ = settings(max_examples=EXAMPLES, deadline=None, suppress_health_check=list(HealthCheck))
 
 
 @pytest.fixture(scope="module")
-def client(tmp_path_factory):
-    d = tmp_path_factory.mktemp("fuzz")
-    api.REPORTS_FILE = d / "reports.jsonl"
-    trips.DB_FILE = d / "trips.sqlite3"
+def client():  # the user database is redirected by conftest.private_user_database
     import os
     os.environ["SAFEHER_LLM"] = "template"
     return TestClient(api.app, raise_server_exceptions=False)
@@ -34,10 +30,10 @@ def no_5xx(r):
     assert r.status_code < 500, f"{r.request.method} {r.request.url} → {r.status_code}: {r.text[:300]}"
 
 
-# Coordinates: inside each area, near the edges, outside, and nonsense.
+# Coordinates: inside each city, near the edges, outside, and nonsense.
 def in_area():
-    return st.sampled_from(sorted(AREAS)).flatmap(lambda a: st.tuples(
-        st.floats(AREAS[a].south, AREAS[a].north), st.floats(AREAS[a].west, AREAS[a].east)))
+    return st.sampled_from(sorted(CITIES)).flatmap(lambda c: st.tuples(
+        st.floats(CITIES[c].south, CITIES[c].north), st.floats(CITIES[c].west, CITIES[c].east)))
 
 
 weird_numbers = st.one_of(st.floats(allow_nan=True, allow_infinity=True), st.integers(-10**12, 10**12),
@@ -78,11 +74,11 @@ def test_malformed_json_bodies(client, body):
 
 
 @FUZZ
-@given(q=text, area=st.one_of(st.none(), st.sampled_from(sorted(AREAS)), text), limit=st.integers(-5, 10_000))
-def test_search_never_crashes(client, q, area, limit):
+@given(q=text, city=st.one_of(st.none(), st.sampled_from(sorted(CITIES)), text), limit=st.integers(-5, 10_000))
+def test_search_never_crashes(client, q, city, limit):
     params = {"q": q, "limit": limit}
-    if area is not None:
-        params["area"] = area
+    if city is not None:
+        params["city"] = city
     no_5xx(client.get("/api/search", params=params))
 
 

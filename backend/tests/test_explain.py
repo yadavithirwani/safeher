@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from safeher import explain as ex
-from safeher.areas import AREAS
+from safeher import store
 from safeher.plan import plan
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -12,8 +12,7 @@ TRIPS = {
     "del-hauz-khas-saket": ((28.5433, 77.2067), (28.5286, 77.2195)),
     "blr-indiranagar-mg-road": ((12.9784, 77.6408), (12.9756, 77.6067)),
 }
-needs_data = pytest.mark.skipif(
-    not all((AREAS[a].dir / "walk.graphml").exists() for a in TRIPS), reason="OSM snapshots not fetched")
+needs_data = pytest.mark.skipif(not store.available(), reason="run: python -m safeher.data build")
 
 
 @pytest.fixture(scope="module")

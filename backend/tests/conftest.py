@@ -20,10 +20,7 @@ def no_real_google_by_default(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def no_real_downloads(monkeypatch, tmp_path):
-    """Tests never download street data: trip areas go to a temporary folder, and the download step
-    is replaced by a stub unless a test installs its own (see test_anywhere.py)."""
-    from safeher import areas, prepare
-    monkeypatch.setattr(areas, "TRIP_DATA_DIR", tmp_path / "trip-areas")
-    monkeypatch.setattr(areas, "_trip_areas", {})
-    monkeypatch.setattr(prepare, "_download", lambda area: None)
+def private_user_database(monkeypatch, tmp_path):
+    """Each test gets its own empty user database (reports, live trips) instead of backend/var."""
+    from safeher import userdb
+    monkeypatch.setattr(userdb, "DB_FILE", tmp_path / "safeher.sqlite3")

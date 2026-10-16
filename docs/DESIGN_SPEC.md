@@ -175,7 +175,7 @@ A dedicated layer and quick-action bar for essential stops **on or near the plan
 - **Panel:** a comparison line ("Most support takes N min longer and scores X vs Y"), route cards (score ring, band, label, two data-only reasons, weak-stretch count), and for the selected route: per-signal bars with confidence, weak stretches (tap to highlight), stops along the route, **Start in Google Maps** (walking hand-off with 3 waypoints to keep the chosen path), **Copy route link** (state lives in the URL hash) and **How is this calculated?** (live weights for the chosen time, formula, bands, limits).
 - **Departure-time slider (00:00–23:45, 15-min steps):** re-scores as you drag, which shows lighting weight, closing hours and the day/night map switch live. The demo opens at 9:30 PM.
 - **Reporting:** category grid, then tap the map. Anonymous, snapped to the nearest street node, pending (counts half). Routes re-score immediately.
-- **API:** `GET /api/areas`, `/api/meta`, `/api/search`, `/api/nearby`, `/api/layers/{area}`, `/api/reports`; `POST /api/plan`, `/api/reports`. Reports are stored in `backend/var/reports.jsonl` (gitignored; Firestore later).
+- **API:** `GET /api/cities`, `/api/meta`, `/api/search?city=`, `/api/nearby`, `/api/layers?south&west&north&east` (≤ 0.05° × 0.05°), `/api/reports?city=`; `POST /api/plan`, `/api/explain`, `/api/reports`, `/api/trips`. Trips outside the supported cities get **422** with a message the app shows. Reports and live trips are stored in `backend/var/safeher.sqlite3` (gitignored; Firestore later). See §8.13.
 
 ## 7. Scoring model
 
@@ -257,7 +257,7 @@ For the MVP the backend runs on open data with no paid API keys. Google services
 - **Cached snapshots:** public Overpass servers time out often, so each demo area is downloaded once (with mirror fallback) into `data/` and the API serves from that cache. The demo never depends on a live third-party server.
 
 ### 8.2 Demo areas and measured data coverage (fetched 7 Oct 2026)
-Rebuild with `python -m safeher.fetch` (from `backend/`). Snapshots are committed in `data/areas/` (~9 MB) so the demo works offline.
+*Superseded by §8.13:* the per-area snapshots in `data/areas/` were removed; all data now comes from `python -m safeher.data build`.
 
 | Area | Walkable network | Streets tagged `lit=*` | Street lamps mapped | Places with `opening_hours` |
 |---|---|---|---|---|
@@ -309,12 +309,12 @@ Rebuild with `python -m safeher.fetch` (from `backend/`). Snapshots are committe
 ### 8.6 Configuration: nothing city- or model-specific in code (13 Oct 2026)
 | File | Holds |
 |---|---|
-| `config/areas.json` | Demo areas: bbox, city, timezone, NCRB district, landmarks, default trip. Adding an area means one entry plus `python -m safeher.fetch <id>`. Validated on start-up: landmarks must lie inside their area, and the default trip must name two of its landmarks. |
+| `config/cities.json` | Supported cities: bbox, timezone, OSM extract, landmarks, default trip, OSM → NCRB district mapping; data sources (Geofabrik, NASA product/year, NCRB URL and heads). Adding a city means one entry plus `python -m safeher.data build`. Validated on start-up: landmarks must lie inside their city, and the default trip must name two of its landmarks. |
 | `config/scoring.json` | The published, versioned scoring model: weights, route formula, bands, every signal threshold and confidence, report severities, typical opening hours, routing limits, when reasons are shown. Weights must sum to 1 (checked on start-up). |
-| `config/app.json` | Default area and departure time (`"21:30"` for night demos, `null` for now), helplines, disclaimer, basemaps, languages, nearby/search limits. |
+| `config/app.json` | Default city, trip limits (max km, corridor margin, corridor cache), departure time (`"21:30"` for night demos, `null` for now), helplines, disclaimer, basemaps, languages, nearby/search limits. |
 | `backend/.env` / environment | Secrets and machine-specific values: `GEMINI_API_KEY`, `GEMINI_MODEL`, `SAFEHER_LLM`, `OLLAMA_URL`, `OLLAMA_MODEL`, `EARTHDATA_TOKEN`, `OVERPASS_URLS`, `SAFEHER_CONFIG_DIR`, `SAFEHER_URL` (demo recorder). |
 
-- The frontend reads its city data, timezone, map styles, default trip and time, and languages from `/api/areas` and `/api/meta`; `app.js` holds no city data.
+- The frontend reads its city data, timezone, map styles, default trip and time, and languages from `/api/cities` and `/api/meta`; `app.js` holds no city data.
 - The demo recorder's captions (scores, lamp counts, times) come from the live API at recording time.
 - Tests compare against computed results, not fixed numbers.
 - The start-up validation found that the "Hauz Khas Village" landmark lay outside the Delhi bbox, so picking it would have failed. It was removed. Enlarging the area (and re-fetching it) would restore it.
@@ -354,13 +354,13 @@ Rebuild with `python -m safeher.fetch` (from `backend/`). Snapshots are committe
 
 **Live-sharing storage:** stays SQLite (transactional, many small writes). WAL for multi-worker reads, in-process write lock, and a WAL checkpoint + truncate after any deletion so a stopped/expired location leaves no bytes on disk (tested with a second worker connection open). **DuckDB** was considered and suits the planned analytics dashboard (§5.8), not this store: it allows only one read-write process per database file.
 
-### 8.10 Go anywhere (implemented 16 Oct 2026: `backend/safeher/prepare.py`)
+### 8.10 Go anywhere (16 Oct 2026; *removed in §8.13*)
 - Trips outside the configured areas are allowed up to `anywhere.max_trip_km` (8 km straight line). The first plan for a new place downloads OpenStreetMap data for the trip's **corridor** (both points + 1.2 km, rounded so nearby trips share it) into `data/areas/trip-<hash>/` (gitignored), checks it (≥ 30 street points, ≥ 90% connected), then plans normally. Later trips inside it are instant.
 - While downloading, `/api/plan` returns **202** with the job status and **Google's walking route as an unscored preview** (Google map only). The app shows a progress card and polls `/api/prepare/{id}`. Failures are reported with a retry button; failed downloads aren't retried for 60 s.
 - One download per corridor across workers (file lock); status on disk so any worker can answer; departures use the location's own timezone (`timezonefinder`); search is Google-biased to the map centre instead of restricted to demo areas; nearby works anywhere via Google.
 - **Measured problem:** public Overpass servers took 343 s for a small Mumbai corridor and over 10 minutes (stalled) for Toit → Koramangala (7.4 × 4.2 km). On-demand downloads are too slow for a demo → plan: pre-load full Delhi and Bengaluru from Geofabrik extracts and cut corridors locally.
 
-### 8.11 Full-city street data (implemented 16 Oct 2026: `backend/safeher/citydata.py`, `config/cities.json`)
+### 8.11 Full-city street data (16 Oct 2026; *consolidated into §8.13*)
 - **Source:** Geofabrik extracts `northern-zone-latest.osm.pbf` (224 MB, Delhi) and `southern-zone-latest.osm.pbf` (544 MB, Bengaluru), data to 15 Oct 2026, checksums verified, kept in `data/raw/osm/` (gitignored).
 - **Build** (`python -m safeher.citydata build`, about 1 minute per city): one pyosmium pass keeps walkable street segments (OSMnx "walk" rules) and the same place categories as the Overpass download, inside each city's bbox, stored in **DuckDB** (`data/cities/<id>.duckdb`, gitignored), sorted by location.
   - Delhi: 997,981 segments, 14,581 places, 36 MB. Bengaluru: 612,470 segments, 24,455 places, 24 MB.
@@ -372,6 +372,21 @@ Rebuild with `python -m safeher.fetch` (from `backend/`). Snapshots are committe
 - Grids: the two demo areas (`data/areas/<id>/viirs.npz`, committed) and **whole cities** (`data/cities/<id>_viirs.npz`, gitignored; `python -m safeher.viirs cities`): Delhi 125×118 px, Bengaluru 79×77 px. Trip corridors use their city's grid, so brightness is ranked city-wide.
 - Checks: Hauz Khas Deer Park (radiance 38.5, 11th percentile) is darker than Aurobindo Marg at Hauz Khas Metro (54.6, 52nd) and Select Citywalk (75.7, 97th). Jahanpanah City Forest reads 65th percentile: 500 m pixels blend a forest edge with nearby roads, which is why VIIRS never overrides street-level data.
 - Effect at 9:30 pm: Delhi demo trip 81/70/68 → 84/75/73 (lighting confidence 0.27 → 0.45); Bengaluru 93/89/74 → 94/93/75. Ranking unchanged.
+
+### 8.13 One database, supported cities only (16 Oct 2026: `safeher/data.py`, `store.py`, `cities.py`, `userdb.py`)
+Data used to live in five places (committed area snapshots, per-city DuckDB files, NumPy grids, an NCRB JSON and a JSONL of reports). It is now two files:
+
+| File | Holds | Written by |
+|---|---|---|
+| `data/safeher.duckdb` (~145 MB, gitignored) | Reference data for every city: `segments` (walkable streets), `places`, `night_lights` (NASA pixels), `districts` (OSM admin_level-5 polygons), `incidents` (NCRB per police district), `sources` (what was built from what, and when) | `python -m safeher.data build`, the only build command; opened **read-only** by every worker |
+| `backend/var/safeher.sqlite3` (gitignored, chmod 600) | User data: community reports and live shared trips | The API (WAL, `secure_delete`, checkpoint after deletes so removed locations don't linger) |
+
+- **Supported cities only.** Delhi and Bengaluru, whole-city (Delhi 998k street segments, 33k places; Bengaluru 612k, 51k). A trip outside them, across two cities, or longer than `max_trip_km` (8 km) gets a 422 with a message the user can act on. The on-demand download queue (§8.10) and Google preview were removed: nothing is fetched while planning.
+- **Corridors in memory.** A trip is planned on its corridor (both points + 1.2 km, rounded to 0.001° so nearby trips share one), built from DuckDB in 0.2–3 s and kept in an LRU of 24. Nothing is written to disk.
+- **Incidents per point.** NCRB figures are no longer assigned per area: each point on a route is looked up in OSM district polygons (shapely, prepared) and mapped to its NCRB police district via `config/cities.json`. A route crossing districts uses each one's figure, and the data note names them (e.g. Connaught Place → Karol Bagh: New Delhi and Central). Old Delhi and Central North Delhi (2023 revenue districts) and the Gurugram/Faridabad parts of the Delhi bbox have no mapping → "no data", weight redistributed. Bengaluru has no NCRB district split → "no data".
+- **Search** covers the whole city: landmarks, every named place (now incl. bars, offices, transit), neighbourhoods (`place=suburb` etc.) and streets (one entry per name per ~2 km). Results show their neighbourhood; equal matches are ordered by distance from the map centre. Google suggestions are restricted to the current city's rectangle and are only de-duplicated against that city's results.
+- **Map layers** are loaded for the visible box at zoom ≥ 14 (`/api/layers?bbox`); a whole-city request is refused.
+- **Strict:** if the database is missing the API fails with the build command, never with an empty map.
 
 ## 9. Architecture (Google stack)
 
@@ -507,3 +522,7 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 16 Oct 2026 | Place-name guardrail ignores names inside places that are in the facts, and matches whole words | Real Gemini answer naming "Indiranagar Traffic Police Station" was rejected because another place is called "Indiranagar" |
 | 16 Oct 2026 | Status files written via unique temp names | Shared temp file caused spurious "download failed" under concurrency |
 | 16 Oct 2026 | NASA night lights live for demo areas and whole cities; trip corridors use the city grid (§8.12) | Delhi lighting was almost entirely a road-type guess |
+| 16 Oct 2026 | Consolidate all reference data into one DuckDB (`python -m safeher.data build`, not committed) and all user data into one SQLite (§8.13) | Data was spread over five formats and folders; one build command, one read-only file shared by every worker |
+| 16 Oct 2026 | Supported cities only; trips elsewhere get a clear 422; download queue removed (§8.13) | User choice: predictable, no multi-minute waits mid-demo |
+| 16 Oct 2026 | NCRB incidents looked up per point via OSM district polygons (§8.13) | Corridors can cross police districts; one value per area was wrong for city-wide trips |
+| 16 Oct 2026 | Layers by visible bbox at zoom ≥ 14; search city-wide with neighbourhoods and nearest-first | Whole-city layers would be hundreds of thousands of points |

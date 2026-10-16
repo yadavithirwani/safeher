@@ -6,13 +6,13 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from . import config, ncrb
+from . import config, store
 from .backup import BackupCoverage
 from . import signals as sig
-from .areas import Area, area_covering
+from .cities import CITIES, City, corridor
 from .geo import LatLon, haversine_m, interpolate, polyline_distance_m, split_polyline
 from .pois import Poi, PointIndex
-from .routing import AreaData, Edge, candidate_paths, edge_between, load_area, path_edges
+from .routing import AreaData, Edge, candidate_paths, edge_between, path_edges
 from .scoring import WEIGHTS_VERSION, SegmentScore, band, night_fraction, score_route, score_segment, weights_at
 
 _C = config.scoring()
@@ -52,12 +52,22 @@ class TripContext:
     night: float
     weights: dict[str, float]
     reports: PointIndex[sig.Report] = field(default_factory=lambda: PointIndex(()))
-    incidents: sig.Reading = sig.NO_DATA  # one value per area: NCRB data is district-level
+    # NCRB is per police district: looked up for each point, cached at ~10 m, and every district the
+    # scored routes touch is remembered for the trip's data note.
+    _incidents: dict = field(default_factory=dict, repr=False)
+    seen_districts: dict[str, None] = field(default_factory=dict, repr=False)
 
-    def __post_init__(self) -> None:
-        hit = ncrb.lookup(self.data.area)
-        if hit is not None:
-            self.incidents = sig.incidents(*hit)
+    @property
+    def city(self) -> City:
+        return CITIES[self.data.area.city]
+
+    def incident_at(self, p: LatLon) -> sig.Reading:
+        key = (round(p[0], 4), round(p[1], 4))
+        r = self._incidents.get(key)
+        if r is None:
+            hit = store.incident_at(self.city, p)
+            r = self._incidents[key] = sig.incidents(*hit) if hit else sig.NO_DATA
+        return r
 
     @property
     def local(self) -> datetime:
@@ -91,7 +101,7 @@ def readings_at(ctx: TripContext, p: LatLon, tags: dict | None) -> tuple[dict[st
         sig.LIGHTING: lighting,
         sig.TRANSIT: sig.transit(nearest_stop),
         sig.SAFE_SPACES: sig.safe_spaces([poi.kind for poi in open_places]),
-        sig.INCIDENTS: ctx.incidents,
+        sig.INCIDENTS: ctx.incident_at(p),
         sig.REPORTS: sig.reports(nearby_reports, ctx.when),
     }
     return readings, open_places
@@ -103,6 +113,8 @@ def score_pieces(ctx: TripContext, edges: list[Edge]) -> list[PieceInfo]:
         for pts in split_polyline(e.points, SEGMENT_M):
             mid = interpolate(pts[0], pts[-1], 0.5)
             readings, places = readings_at(ctx, mid, e.tags)
+            if readings[sig.INCIDENTS].confidence > 0:
+                ctx.seen_districts[readings[sig.INCIDENTS].note] = None
             length = sum(haversine_m(a, b) for a, b in zip(pts, pts[1:]))
             pieces.append(PieceInfo(length, pts, score_segment(readings, ctx.weights), places))
     return pieces
@@ -224,11 +236,14 @@ def describe(pieces: list[PieceInfo], local: datetime) -> tuple[dict, list[str]]
 
 
 def incident_note(ctx: TripContext) -> str:
-    if ctx.incidents.confidence == 0:
-        return (f"No sub-city incident data for {ctx.data.area.city} (NCRB reports it as one unit); "
+    if not ctx.city.districts:
+        return (f"No sub-city incident data for {ctx.city.name} (NCRB reports it as one unit); "
                 "this signal's weight is shared across the others.")
-    return (f"Historical incidents: {ctx.incidents.note} (NCRB). Same for every route in this area, "
-            "so it doesn't change which route ranks first.")
+    if not ctx.seen_districts:
+        return (f"No NCRB police-district figures for this part of {ctx.city.name}; "
+                "this signal's weight is shared across the others.")
+    return ("Historical incidents (NCRB, by police district along the routes): "
+            + "; ".join(ctx.seen_districts) + ".")
 
 
 # --- External routes (e.g. Google): scored by the same engine ----------------------------------
@@ -324,10 +339,8 @@ def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLo
     """
     if when.tzinfo is None:
         raise ValueError("departure time must be timezone-aware")
-    area: Area | None = area_covering(origin, dest)
-    if area is None:
-        raise ValueError("origin and destination must both be inside one area with street data")
-    data = load_area(area.id)
+    area = corridor(origin, dest)  # raises cities.Unsupported outside supported cities
+    data = store.corridor_data(area)
     night = night_fraction(when, *area.center)
     ctx = TripContext(data, when, night, weights_at(night), PointIndex(reports))
     reports_key = hash(tuple((p, r.category, r.created_at, r.verification) for p, r in reports))
@@ -356,7 +369,7 @@ def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLo
     for ext in external_routes:
         pts = [tuple(p) for p in ext["points"]]
         if len(pts) < 2 or not all(area.contains(*p) for p in pts):
-            notes.append(f"A {ext['source']} route leaves the demo area, so it isn't scored.")
+            notes.append(f"A {ext['source']} route leaves this trip's street data, so it isn't scored.")
             continue
         same = next((i for i, line in enumerate(lines) if _same_as(pts, line) >= SAME_ROUTE_SHARE), None)
         if same is not None:

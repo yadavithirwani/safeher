@@ -4,12 +4,12 @@ import sqlite3
 import pytest
 from fastapi.testclient import TestClient
 
-from safeher import api, trips
+from safeher import api, trips, userdb
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(trips, "DB_FILE", tmp_path / "trips.sqlite3")
+    monkeypatch.setattr(userdb, "DB_FILE", tmp_path / "safeher.sqlite3")
     with TestClient(api.app) as client:
         yield client
 
@@ -41,7 +41,7 @@ def test_share_update_read_and_stop(client):
     assert client.delete(path, headers=owner(session)).status_code == 204
     assert client.get(path).status_code == 404
     assert client.put(path + "/location", json=point, headers=owner(session)).status_code == 404
-    with sqlite3.connect(trips.DB_FILE) as conn:
+    with sqlite3.connect(userdb.DB_FILE) as conn:
         assert conn.execute("SELECT count(*) FROM trips").fetchone()[0] == 0
 
 
@@ -62,7 +62,7 @@ def test_expiry_deletes_data(client, monkeypatch):
     monkeypatch.setattr(trips.time, "time", lambda: session["expires_at"] + 1)
     trips.purge_expired()
     assert client.get(path).status_code == 404
-    with sqlite3.connect(trips.DB_FILE) as conn:
+    with sqlite3.connect(userdb.DB_FILE) as conn:
         assert conn.execute("SELECT count(*) FROM trips").fetchone()[0] == 0
 
 
@@ -72,7 +72,7 @@ def test_latest_only_and_hashed_credentials(client):
         assert client.put(path + "/location", headers=owner(session),
                           json={"lat": lat, "lon": 77.21, "accuracy_m": 1}).status_code == 204
     assert client.get(path).json()["location"]["lat"] == 28.55
-    with sqlite3.connect(trips.DB_FILE) as conn:
+    with sqlite3.connect(userdb.DB_FILE) as conn:
         rows = conn.execute("SELECT * FROM trips").fetchall()
         assert len(rows) == 1
         assert session["viewer_token"] not in str(rows)
@@ -108,7 +108,7 @@ def test_concurrent_sharing_sessions_do_not_lock_the_database(tmp_path, monkeypa
     from fastapi.testclient import TestClient
 
     from safeher import api, trips
-    monkeypatch.setattr(trips, "DB_FILE", tmp_path / "trips.sqlite3")
+    monkeypatch.setattr(userdb, "DB_FILE", tmp_path / "safeher.sqlite3")
     client = TestClient(api.app, raise_server_exceptions=False)
 
     def session(i):
@@ -135,7 +135,7 @@ def test_stopped_location_leaves_no_bytes_on_disk(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from safeher import api, trips
-    monkeypatch.setattr(trips, "DB_FILE", tmp_path / "trips.sqlite3")
+    monkeypatch.setattr(userdb, "DB_FILE", tmp_path / "safeher.sqlite3")
     client = TestClient(api.app)
     lat, lon = 28.5437123456789, 77.2061987654321  # distinctive values to search for
     t = client.post("/api/trips", json={"route": [[77.2067, 28.5433], [77.2195, 28.5286]]}).json()
@@ -145,13 +145,13 @@ def test_stopped_location_leaves_no_bytes_on_disk(tmp_path, monkeypatch):
     needles = [struct.pack(">d", lat), struct.pack(">d", lon), trips.digest(t["viewer_token"]).encode()]
 
     def on_disk():
-        blobs = b"".join(f.read_bytes() for f in tmp_path.iterdir() if f.name.startswith("trips.sqlite3"))
+        blobs = b"".join(f.read_bytes() for f in tmp_path.iterdir() if f.name.startswith("safeher.sqlite3"))
         return [n in blobs for n in needles]
 
     assert any(on_disk())  # sanity: while sharing, the point is stored
     # Another worker process keeps its own connection open, so SQLite won't tidy the log on close.
     import sqlite3
-    other_worker = sqlite3.connect(trips.DB_FILE)
+    other_worker = sqlite3.connect(userdb.DB_FILE)
     other_worker.execute("SELECT count(*) FROM trips").fetchone()
     try:
         assert client.delete(f"/api/trips/{t['viewer_token']}", headers=auth).status_code == 204

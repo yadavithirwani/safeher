@@ -1,21 +1,158 @@
 {
-  "_comment": "Whole cities pre-loaded from Geofabrik extracts (python -m safeher.citydata build). Trips inside a city's bbox cut their corridor from the local city database instead of downloading from Overpass.",
-  "source_dir": "data/raw/osm",
-  "output_dir": "data/cities",
+  "_comment": "Every supported city. `python -m safeher.data build` turns this into data/safeher.duckdb. Adding a city = one entry here + the build command.",
+  "output": "data/safeher.duckdb",
+  "raw_dir": "data/raw",
+  "osm_extract_base_url": "https://download.geofabrik.de/asia/india/",
+  "night_lights": {
+    "product": "VNP46A4",
+    "year": 2025
+  },
+  "ncrb": {
+    "_comment": "NCRB 'Crime in India', district-wise crimes against women, via the India Data Portal (CKAN API, no key). Public-space heads only; 2020 skipped (lockdown).",
+    "url": "https://ckandev.indiadataportal.com/dataset/e311a510-ce48-4f4c-baf6-0ec5f9278285/resource/c8d3ea7e-4855-45f3-9c26-557419e93b6a/download/districtwise-crime-against-women-2017-onwards.csv",
+    "heads": [
+      "assault_on_womenabove_18",
+      "insult_to_the_modesty_of_women_above_18",
+      "attempt_to_commit_rape_above_18",
+      "kidnapping_and_abduction_of_women_others"
+    ],
+    "years": [
+      "2019",
+      "2021",
+      "2022"
+    ],
+    "confidence": 0.15
+  },
   "cities": [
     {
       "id": "delhi",
       "name": "Delhi",
+      "timezone": "Asia/Kolkata",
       "extract": "northern-zone-latest.osm.pbf",
-      "bbox": { "south": 28.40, "west": 76.83, "north": 28.89, "east": 77.35 },
-      "timezone": "Asia/Kolkata"
+      "bbox": {
+        "south": 28.4,
+        "west": 76.83,
+        "north": 28.89,
+        "east": 77.35
+      },
+      "default_trip": [
+        "Hauz Khas Metro",
+        "Select Citywalk, Saket"
+      ],
+      "landmarks": [
+        {
+          "name": "Hauz Khas Metro",
+          "lat": 28.5433,
+          "lon": 77.2067
+        },
+        {
+          "name": "Select Citywalk, Saket",
+          "lat": 28.5286,
+          "lon": 77.2195
+        },
+        {
+          "name": "Malviya Nagar Metro",
+          "lat": 28.5283,
+          "lon": 77.2054
+        },
+        {
+          "name": "Green Park",
+          "lat": 28.553,
+          "lon": 77.2068
+        },
+        {
+          "name": "Saket Metro",
+          "lat": 28.5206,
+          "lon": 77.2015
+        },
+        {
+          "name": "Panchsheel Park",
+          "lat": 28.5418,
+          "lon": 77.2183
+        }
+      ],
+      "districts": {
+        "_comment": "OSM admin_level 5 districts → NCRB police districts with the same name. Central North Delhi and Old Delhi (2023 revenue districts) have no police-district counterpart: no data.",
+        "admin_level": "5",
+        "ncrb_state": "Delhi",
+        "ncrb_exclude": [
+          "Crime Branch",
+          "Economic Offences Wing",
+          "Igi Airport",
+          "Metro",
+          "Railway",
+          "Spl Cell",
+          "Spuwac",
+          "Vigilance"
+        ],
+        "osm_to_ncrb": {
+          "Central Delhi": "Central",
+          "East Delhi": "East",
+          "New Delhi": "New Delhi",
+          "North Delhi": "North",
+          "North East Delhi": "North-East",
+          "North West Delhi": "North-West",
+          "Outer North Delhi": "Outer North",
+          "South Delhi": "South",
+          "South East Delhi": "South-East",
+          "South West Delhi": "South-West",
+          "West Delhi": "West"
+        }
+      }
     },
     {
       "id": "bengaluru",
       "name": "Bengaluru",
+      "timezone": "Asia/Kolkata",
       "extract": "southern-zone-latest.osm.pbf",
-      "bbox": { "south": 12.83, "west": 77.45, "north": 13.15, "east": 77.78 },
-      "timezone": "Asia/Kolkata"
+      "bbox": {
+        "south": 12.83,
+        "west": 77.45,
+        "north": 13.15,
+        "east": 77.78
+      },
+      "default_trip": [
+        "Indiranagar Metro",
+        "MG Road Metro"
+      ],
+      "landmarks": [
+        {
+          "name": "Indiranagar Metro",
+          "lat": 12.9784,
+          "lon": 77.6408
+        },
+        {
+          "name": "MG Road Metro",
+          "lat": 12.9756,
+          "lon": 77.6067
+        },
+        {
+          "name": "Trinity Metro",
+          "lat": 12.9729,
+          "lon": 77.617
+        },
+        {
+          "name": "Halasuru Metro",
+          "lat": 12.9762,
+          "lon": 77.6267
+        },
+        {
+          "name": "100 Feet Road, Indiranagar",
+          "lat": 12.9719,
+          "lon": 77.6412
+        },
+        {
+          "name": "Brigade Road",
+          "lat": 12.9719,
+          "lon": 77.6074
+        },
+        {
+          "name": "Cubbon Park",
+          "lat": 12.9763,
+          "lon": 77.6033
+        }
+      ],
+      "districts": null
     }
   ]
 }

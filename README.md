@@ -50,15 +50,16 @@ Tests: `cd backend && .venv/bin/pytest tests/test_backup.py`.
 ```bash
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m safeher.data build   # once: Delhi + Bengaluru → data/safeher.duckdb (~145 MB)
 .venv/bin/uvicorn safeher.api:app --port 8765 --workers 4 --no-access-log
 ```
 Open http://localhost:8765.
 
-Settings live in `config/`: demo areas and landmarks (`areas.json`), the published scoring model (`scoring.json`) and app defaults such as the opening time and helplines (`app.json`). Add an area by adding an entry to `areas.json` and running `.venv/bin/python -m safeher.fetch <area-id>`.
+Settings live in `config/`: supported cities, landmarks and data sources (`cities.json`), the published scoring model (`scoring.json`) and app defaults such as the opening time, trip limits and helplines (`app.json`). The build downloads the Geofabrik OpenStreetMap extracts, NASA night lights (needs `EARTHDATA_TOKEN` in `backend/.env`) and NCRB figures into one DuckDB file; add a city with one entry in `cities.json` and a rebuild. Walks work anywhere inside Delhi and Bengaluru; elsewhere the app says so.
 
 **Google Maps Platform (optional).** Put `GOOGLE_MAPS_API_KEY=...` in `backend/.env` (Cloud project with billing; enable Map Tiles API, Places API (New), Routes API, Street View Static API) to switch on the Google basemap, Google search, live "open now", Google route comparison and Street View. Check every API with `.venv/bin/python -m safeher.google_check`. Without a key everything runs on open data.
 
-Route explanations use **Gemini** when `GEMINI_API_KEY=...` is set in `backend/.env` (free key from [Google AI Studio](https://aistudio.google.com/apikey); never commit it). Without a key, a fact-checked template is used. Map data for both demo areas is already in `data/areas/`; rebuild it with `.venv/bin/python -m safeher.fetch`. Run the tests with `.venv/bin/pytest`.
+Route explanations use **Gemini** when `GEMINI_API_KEY=...` is set in `backend/.env` (free key from [Google AI Studio](https://aistudio.google.com/apikey); never commit it). Without a key, a fact-checked template is used. Run the tests with `.venv/bin/pytest`.
 
 ### Tests
 From `backend/`: `.venv/bin/pytest` (unit, API, data integrity, random trips, fuzzing). Heavier runs: `SAFEHER_FUZZ_EXAMPLES=1000 .venv/bin/pytest tests/test_fuzz.py`, `SAFEHER_SEED=<n> SAFEHER_TRIPS=5 .venv/bin/pytest tests/test_random_trips.py`. Load test against a running server: `.venv/bin/python -m tests.tools.load_test --users 40 --seconds 60`.

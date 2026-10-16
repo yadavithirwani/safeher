@@ -1,11 +1,11 @@
-"""End-to-end checks on the cached OSM snapshots. Skipped if the data hasn't been fetched."""
+"""End-to-end checks on data/safeher.duckdb. Skipped if it hasn't been built."""
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from safeher.areas import AREAS
+from safeher import store
 from safeher.plan import DISCLAIMER, plan
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -14,10 +14,7 @@ TRIPS = {
     "del-hauz-khas-saket": ((28.5433, 77.2067), (28.5286, 77.2195)),
 }
 
-pytestmark = pytest.mark.skipif(
-    not all((AREAS[a].dir / "walk.graphml").exists() for a in TRIPS),
-    reason="OSM snapshots not fetched (python -m safeher.fetch)",
-)
+pytestmark = pytest.mark.skipif(not store.available(), reason="run: python -m safeher.data build")
 
 
 @pytest.fixture(scope="module", params=list(TRIPS))
@@ -60,9 +57,9 @@ def test_never_says_safe(night_plan):
 def test_incidents_signal_is_honest_about_coverage(night_plan):
     values = {(b["value"], b["confidence"]) for r in night_plan["routes"]
               for b in r["breakdown"] if b["signal"] == "incidents"}
-    assert len(values) == 1  # district-level data: identical for every route in the area
+    assert len(values) == 1  # this trip stays inside one police district: same figure on every route
     value, confidence = values.pop()
-    if night_plan["area"]["city"] == "Bengaluru":
+    if night_plan["area"]["city"] == "bengaluru":
         assert value is None and confidence == 0  # one city-wide unit: not scored as zero
     else:
         assert value is not None and 0 < confidence <= 0.2
@@ -74,3 +71,11 @@ def test_scores_lower_late_at_night_than_daytime():
     day = plan(o, d, datetime(2026, 10, 7, 13, 0, tzinfo=IST))
     late = plan(o, d, datetime(2026, 10, 7, 23, 45, tzinfo=IST))
     assert max(r["score"] for r in late["routes"]) < max(r["score"] for r in day["routes"])
+
+
+def test_a_trip_across_police_districts_names_each_one():
+    """Connaught Place (New Delhi district) → Karol Bagh (Central Delhi): incidents are looked up per
+    point, so both districts' NCRB figures are used and named."""
+    p = plan((28.6315, 77.2167), (28.6519, 77.1909), datetime(2026, 10, 7, 21, 30, tzinfo=IST))
+    note = next(n for n in p["data_notes"] if "NCRB" in n)
+    assert "New Delhi police district" in note and "Central police district" in note

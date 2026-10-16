@@ -1,12 +1,13 @@
 """End-to-end checks on random trips, plus invalid requests.
 
-Trips are drawn from the street network of each demo area with a seeded RNG:
+Trips are drawn from anywhere on each supported city's street network with a seeded RNG:
     SAFEHER_SEED=42 SAFEHER_TRIPS=2 .venv/bin/pytest tests/test_random_trips.py -s
 The seed is printed so any failure can be reproduced exactly.
 """
 
 from __future__ import annotations
 
+import math
 import os
 import random
 from datetime import datetime
@@ -14,37 +15,48 @@ from datetime import datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from safeher import api
+from safeher import api, store
 from safeher import signals as sig
 from safeher.plan import TripContext, edge_support, score_pieces
 from safeher.pois import PointIndex
 from safeher.routing import candidate_paths, path_edges
 from safeher.scoring import night_fraction, score_route, weights_at
-from safeher.areas import AREAS
+from safeher.cities import CITIES, corridor
 from safeher.explain import check, facts_from_plan
 from safeher.geo import haversine_m, polyline_distance_m, polyline_length_m
-from safeher.routing import load_area
 from safeher.scoring import BANDS
 
 SEED = int(os.environ.get("SAFEHER_SEED", "20261013"))
-TRIPS_PER_AREA = int(os.environ.get("SAFEHER_TRIPS", "2"))
+TRIPS_PER_CITY = int(os.environ.get("SAFEHER_TRIPS", "2"))
 TIMES = ["13:00", "21:30", "23:45"]
 
-pytestmark = pytest.mark.skipif(
-    not all((a.dir / "walk.graphml").exists() for a in AREAS.values()), reason="OSM snapshots not fetched")
+pytestmark = pytest.mark.skipif(not store.available(), reason="run: python -m safeher.data build")
 
 
 def random_trips() -> list[tuple[str, tuple, tuple, str]]:
-    """(area_id, origin, destination, HH:MM) — street nodes 0.8-3 km apart, so routes are meaningful."""
+    """(city_id, origin, destination, HH:MM): street corners anywhere in the city, 0.8-3 km apart."""
+    if not store.available():
+        return []
     rng = random.Random(SEED)
     trips = []
-    for area_id in sorted(AREAS):
-        data = load_area(area_id)
-        nodes = list(data.graph.nodes)
-        while sum(t[0] == area_id for t in trips) < TRIPS_PER_AREA:
-            o, d = (data.node_latlon(rng.choice(nodes)) for _ in range(2))
+    for city_id in sorted(CITIES):
+        c = CITIES[city_id]
+        n = store.con().execute("SELECT count(*) FROM segments WHERE city = ?", [city_id]).fetchone()[0]
+        while sum(t[0] == city_id for t in trips) < TRIPS_PER_CITY:
+            lat, lon = store.con().execute("SELECT lat1, lon1 FROM segments WHERE city = ? ORDER BY way, u, v "
+                                           "LIMIT 1 OFFSET ?", [city_id, rng.randrange(n)]).fetchone()
+            bearing, dist = rng.uniform(0, 2 * math.pi), rng.uniform(1000, 2500)
+            far = (lat + dist * math.cos(bearing) / 111_320,
+                   lon + dist * math.sin(bearing) / (111_320 * math.cos(math.radians(lat))))
+            if not (c.contains(lat, lon) and c.contains(*far)):
+                continue
+            data = store.corridor_data(corridor((lat, lon), far))
+            snapped = [data.nodes.nearest(p, 150) for p in ((lat, lon), far)]
+            if None in snapped:
+                continue  # e.g. a lake or an airfield: try elsewhere
+            o, d = (data.node_latlon(n_) for _, n_ in snapped)
             if 800 <= haversine_m(o, d) <= 3000:
-                trips.append((area_id, o, d, rng.choice(TIMES)))
+                trips.append((city_id, o, d, rng.choice(TIMES)))
     return trips
 
 
@@ -54,8 +66,7 @@ print(f"\n[random trips] SAFEHER_SEED={SEED}: " + "; ".join(
 
 
 @pytest.fixture(scope="module")
-def client(tmp_path_factory):
-    api.REPORTS_FILE = tmp_path_factory.mktemp("reports") / "reports.jsonl"
+def client():
     os.environ["SAFEHER_LLM"] = "template"
     yield TestClient(api.app)
     os.environ.pop("SAFEHER_LLM", None)
@@ -68,13 +79,13 @@ def body(o, d, t, **extra):
 
 @pytest.mark.parametrize("trip", TRIPS, ids=lambda t: f"{t[0]}@{t[3]}")
 def test_random_trip_all_features(client, trip):
-    area_id, o, d, t = trip
+    city_id, o, d, t = trip
     res = client.post("/api/plan", json=body(o, d, t))
     assert res.status_code == 200, res.text
     p = res.json()
     routes = p["routes"]
     straight = haversine_m(o, d)
-    print(f"\n  {area_id} {t}: straight {straight:.0f} m → " + ", ".join(
+    print(f"\n  {city_id} {t}: straight {straight:.0f} m → " + ", ".join(
         f"{r['label']} {r['distance_m']} m/{r['duration_min']} min score {r['score']}" for r in routes))
 
     # Routes: 1-3, distinct labels, sorted by score, within the detour limit.
@@ -137,11 +148,11 @@ def test_random_trip_all_features(client, trip):
     assert rep.status_code == 201 and rep.json()["verification"] == "pending"
     assert client.post("/api/plan", json=body(o, d, t)).status_code == 200
     # …and on the exact same path, a harassment report lowers the score and never raises it.
-    assert_report_lowers_same_path(area_id, o, d, t)
+    assert_report_lowers_same_path(o, d, t)
 
 
-def assert_report_lowers_same_path(area_id, o, d, t):
-    data = load_area(area_id)
+def assert_report_lowers_same_path(o, d, t):
+    data = store.corridor_data(corridor(o, d))
     when = datetime.fromisoformat(f"2026-10-13T{t}:00").replace(tzinfo=data.area.tz)
     night = night_fraction(when, *data.area.center)
     w = weights_at(night)
@@ -166,8 +177,9 @@ BLR = (12.9784, 77.6408)
 
 
 @pytest.mark.parametrize("name, method, path, payload, status, detail", [
-    ("origin too far from destination", "post", "/api/plan", body((19.07, 72.87), DEL, "21:30"), 422, "plans walks up to"),
-    ("trip across two cities", "post", "/api/plan", body(DEL, BLR, "21:30"), 422, "plans walks up to"),
+    ("origin outside supported cities", "post", "/api/plan", body((19.07, 72.87), DEL, "21:30"), 422, "only"),
+    ("too far to walk", "post", "/api/plan", body(DEL, (28.70, 77.30), "21:30"), 422, "plans walks up to"),
+    ("trip across two cities", "post", "/api/plan", body(DEL, BLR, "21:30"), 422, "same city"),
     ("same start and end", "post", "/api/plan", body(DEL, DEL, "21:30"), 422, "same place"),
     ("latitude out of range", "post", "/api/plan", body((999, 77.2), DEL, "21:30"), 422, None),
     ("missing destination", "post", "/api/plan", {"origin": {"lat": DEL[0], "lon": DEL[1]}}, 422, None),
@@ -175,14 +187,17 @@ BLR = (12.9784, 77.6408)
      {**body(DEL, (28.5286, 77.2195), "21:30"), "depart_at": "tomorrow evening"}, 422, None),
     ("unsupported language", "post", "/api/explain", body(DEL, (28.5286, 77.2195), "21:30", lang="fr"), 422, None),
     ("unknown report category", "post", "/api/reports", {"lat": DEL[0], "lon": DEL[1], "category": "spam"}, 422, None),
-    ("report outside demo areas", "post", "/api/reports", {"lat": 19.07, "lon": 72.87, "category": "harassment"}, 422,
-     "demo areas"),
+    ("report outside supported cities", "post", "/api/reports", {"lat": 19.07, "lon": 72.87, "category": "harassment"},
+     422, "only accepted in"),
     ("report note too long", "post", "/api/reports",
      {"lat": DEL[0], "lon": DEL[1], "category": "harassment", "note": "x" * 300}, 422, None),
     ("unknown nearby category", "get", "/api/nearby", {"lat": DEL[0], "lon": DEL[1], "kind": "bars"}, 422, None),
-    ("nearby outside demo areas", "get", "/api/nearby", {"lat": 19.07, "lon": 72.87, "kind": "police"}, 422, None),
+    ("nearby outside supported cities", "get", "/api/nearby", {"lat": 19.07, "lon": 72.87, "kind": "police"}, 422, "only"),
     ("empty search", "get", "/api/search", {"q": ""}, 422, None),
-    ("unknown map layer area", "get", "/api/layers/mumbai", None, 404, None),
+    ("map layers without a box", "get", "/api/layers", None, 422, None),
+    ("map layers for a whole city", "get", "/api/layers",
+     {"south": 28.40, "west": 76.83, "north": 28.89, "east": 77.35}, 422, "Zoom in"),
+    ("unknown search city", "get", "/api/search", {"q": "metro", "city": "mumbai"}, 404, None),
 ])
 def test_invalid_requests_rejected(client, name, method, path, payload, status, detail):
     if method == "post":
@@ -208,14 +223,8 @@ def test_timezone_aware_departure_respected(client):
 
 
 def test_point_off_the_street_network_is_rejected(client):
-    """A point inside a demo area but far from any walkable street is refused, not silently moved."""
-    data = load_area("blr-indiranagar-mg-road")
-    rng = random.Random(SEED)
-    a = data.area
-    for _ in range(4000):
-        pt = (rng.uniform(a.south, a.north), rng.uniform(a.west, a.east))
-        if data.nodes.nearest(pt, 300) is None:
-            r = client.post("/api/plan", json=body(pt, BLR, "21:30"))
-            assert r.status_code == 422 and "no walkable street" in r.json()["detail"]
-            return
-    pytest.skip("every sampled point was within 300 m of a street")
+    """A point inside a city but far from any walkable street is refused, not silently moved.
+    (Turahalli forest, Bengaluru: no street within 300 m.)"""
+    forest = (12.8625, 77.4945)
+    r = client.post("/api/plan", json=body(forest, (12.8800, 77.5100), "21:30"))
+    assert r.status_code == 422 and "no walkable street" in r.json()["detail"]

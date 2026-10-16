@@ -196,17 +196,6 @@ button { cursor: pointer; }
   padding: 2px 6px; border-radius: 4px; }
 @media (max-width: 760px) { .google-brand { left: 12px; bottom: calc(var(--sheet-h) + 10px); } }
 
-/* Go anywhere: preparing a new area */
-.prep-card { margin: 12px; padding: 14px; border-radius: 14px; background: var(--surface-2); }
-.prep-card.failed { background: color-mix(in srgb, var(--score-low) 12%, var(--surface)); }
-.prep-head { display: flex; align-items: center; gap: 10px; font-size: 15px; }
-.prep-card p { margin: 8px 0 0; font-size: 13.5px; }
-.prep-preview { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13.5px; }
-.prep-preview > span:nth-child(2) { flex: 1; }
-.prep-card .btn { margin-top: 12px; }
-.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid var(--border); border-top-color: var(--primary);
-  animation: spin .9s linear infinite; flex-shrink: 0; }
-@keyframes spin { to { transform: rotate(360deg); } }
 
 /* AI explanation card */
 .ai-card { margin: 12px 12px 4px; padding: 12px 14px; border-radius: 14px; background: linear-gradient(135deg, var(--primary-soft), var(--surface-2)); }

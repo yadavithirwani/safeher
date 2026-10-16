@@ -5,22 +5,31 @@ from datetime import datetime
 
 import pytest
 
-from safeher import backup
-from safeher.areas import AREAS
+from safeher import backup, store
+from safeher.cities import CITIES, corridor
 from safeher.plan import TripContext, edge_support
-from safeher.routing import candidate_paths, load_area, path_edges
+from safeher.routing import candidate_paths, path_edges
 from safeher.scoring import night_fraction, weights_at
 from tests.reference import backup_v1
 
-pytestmark = pytest.mark.skipif(
-    not all((a.dir / "walk.graphml").exists() for a in AREAS.values()), reason="OSM snapshots not fetched")
+pytestmark = pytest.mark.skipif(not store.available(), reason="run: python -m safeher.data build")
+
+
+def default_corridors():
+    """Each city's default-trip corridor (a few km of real streets)."""
+    if not store.available():
+        return {}
+    out = {}
+    for c in CITIES.values():
+        lm = {l.name: (l.lat, l.lon) for l in c.landmarks}
+        out[c.id] = store.corridor_data(corridor(*(lm[n] for n in c.default_trip)))
+    return out
 
 
 def trips(seed=99, per_area=3):
     rng = random.Random(seed)
     out = []
-    for area_id in sorted(AREAS):
-        data = load_area(area_id)
+    for area_id, data in sorted(default_corridors().items()):
         nodes = list(data.graph.nodes)
         while sum(t[0] == area_id for t in out) < per_area:
             o, d = (data.node_latlon(rng.choice(nodes)) for _ in range(2))
@@ -33,7 +42,7 @@ def trips(seed=99, per_area=3):
 @pytest.mark.parametrize("trip", trips(), ids=lambda t: f"{t[0]}@{t[3]}")
 def test_optimised_plan_b_matches_original(trip):
     area_id, o, d, t = trip
-    data = load_area(area_id)
+    data = default_corridors()[area_id]
     when = datetime.fromisoformat(f"2026-10-14T{t}:00").replace(tzinfo=data.area.tz)
     night = night_fraction(when, *data.area.center)
     ctx = TripContext(data, when, night, weights_at(night))

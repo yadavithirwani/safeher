@@ -3,10 +3,10 @@ from datetime import datetime, time
 import networkx as nx
 import pytest
 
-from safeher.areas import Area
+from safeher.cities import Area
 from safeher.geo import haversine_m
 from safeher.pois import Poi, PointIndex, classify
-from safeher.routing import AreaData, _parse_listish, candidate_paths, edge_between, overlap, path_length
+from safeher.routing import AreaData, candidate_paths, edge_between, overlap, path_length
 
 START, END = (12.970, 77.600), (12.970, 77.610)
 
@@ -76,10 +76,6 @@ def test_edge_geometry_is_oriented_from_u_to_v():
     assert e.points[0] == START and e.points[-1] == (12.971, 77.605)
 
 
-def test_parse_listish_tags_from_graphml():
-    assert _parse_listish("['yes', 'no']") == ["yes", "no"]
-    assert _parse_listish("yes") == "yes"
-    assert _parse_listish("[broken") == "[broken"
 
 
 # --- POIs ---------------------------------------------------------------------------------

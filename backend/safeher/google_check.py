@@ -14,7 +14,7 @@ import sys
 import httpx
 
 from . import config, google
-from .areas import AREAS
+from .cities import CITIES
 from .explain import _env
 
 ENABLE_HINT = {
@@ -34,7 +34,7 @@ def tile_xy(lat: float, lon: float, z: int) -> tuple[int, int]:
 
 
 def main() -> int:
-    area = AREAS[config.app()["default_area"]]
+    area = CITIES[config.app()["default_city"]]
     o, d = (next(l for l in area.landmarks if l.name == n) for n in area.default_trip)
     results: list[tuple[str, str, bool, str]] = []
 

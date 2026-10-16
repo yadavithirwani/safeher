@@ -158,7 +158,7 @@ class GoogleClient:
                      radius_m: float = 30000) -> list[dict]:
         """Returns [{place_id, main, secondary}].
 
-        bbox = (south, west, north, east) restricts results to that rectangle (demo areas). Without
+        bbox = (south, west, north, east) restricts results to that rectangle (a supported city). Without
         it, results are only *biased* towards `near` within `radius_m`, so any place can be found.
         """
         body = {"input": text, "includedRegionCodes": [_G["region"].lower()], "languageCode": _G["language"]}

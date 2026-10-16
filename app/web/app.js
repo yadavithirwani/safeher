@@ -28,7 +28,7 @@ const REPORT_CATS = {
 const SIGNAL_ICONS = { lighting: "light", transit: "directions_bus", safe_spaces: "storefront", incidents: "history", reports: "campaign" };
 
 const state = {
-  areas: [], meta: null, area: null,
+  cities: [], meta: null, city: null,
   origin: null, dest: null,          // {name, lat, lon}
   departMin: null, isNow: true,      // minutes since local midnight
   plan: null, selected: 0,
@@ -57,7 +57,7 @@ function fmtClock(min) {
 }
 function nowParts() {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
-    timeZone: state.area?.timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    timeZone: state.city?.timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   }).formatToParts(new Date()).map((x) => [x.type, x.value]));
   return { date: `${p.year}-${p.month}-${p.day}`, min: Number(p.hour) * 60 + Number(p.minute) };
 }
@@ -134,9 +134,15 @@ function addLayers() {
   drawRoutes(state.pendingFit);
 }
 
+/* Street lamps, police and washrooms for the visible map; only when zoomed in (thousands of lamps otherwise). */
+const OVERLAY_MIN_ZOOM = 14;
 async function loadOverlays() {
-  if (!state.area || !map.getSource("overlays")) return;
-  try { map.getSource("overlays").setData(await api(`/api/layers/${state.area.id}`)); } catch { /* overlays are optional */ }
+  if (!map || !map.getSource("overlays")) return;
+  const empty = { type: "FeatureCollection", features: [] };
+  if (map.getZoom() < OVERLAY_MIN_ZOOM) { map.getSource("overlays").setData(empty); return; }
+  const b = map.getBounds();
+  const q = `south=${b.getSouth().toFixed(5)}&west=${b.getWest().toFixed(5)}&north=${b.getNorth().toFixed(5)}&east=${b.getEast().toFixed(5)}`;
+  try { map.getSource("overlays").setData(await api(`/api/layers?${q}`)); } catch { /* overlays are optional */ }
 }
 
 /* Google mode: Google's own map tiles, so Google Places/Routes content may be shown on it. */
@@ -232,13 +238,13 @@ function setupSearch(inputSel, listSel, which) {
     }
     if (empty) {
       list.innerHTML = `<li class="suggest-empty">${icon("search_off")}<div><b>No matches for “${esc(empty)}”</b>
-        <small>SafeHer has data for ${esc(state.areas.map((a) => `${a.name} (${a.city})`).join(" and "))} only.</small></div></li>`;
+        <small>SafeHer has data for ${esc(state.cities.map((c) => c.name).join(" and "))} only.</small></div></li>`;
       return;
     }
     const glyph = (r) => (r.source === "google" ? "travel_explore" : r.kind === "landmark" ? "location_on"
       : r.kind === "street" ? "add_road" : "place");
     list.innerHTML = items.map((r, i) => `<li role="option" data-i="${i}" aria-selected="${i === active}">
-      ${icon(glyph(r))}<div><b>${esc(r.name)}</b><small>${esc(r.detail)}${r.other_area ? " · switches city" : ""}</small></div></li>`).join("")
+      ${icon(glyph(r))}<div><b>${esc(r.name)}</b><small>${esc(r.detail)}${r.other_city ? " · switches city" : ""}</small></div></li>`).join("")
       + (items.some((r) => r.source === "google") ? `<li class="powered-by" aria-hidden="true">Search results include Google Maps</li>` : "");
   };
   let session = null; // Google Autocomplete session: one per search, ended by a Place Details call
@@ -247,14 +253,14 @@ function setupSearch(inputSel, listSel, which) {
     if (r.place_id) {
       try {
         const p = await api(`/api/google/place/${encodeURIComponent(r.place_id)}?session=${session || ""}`);
-        r = { ...r, lat: p.lat, lon: p.lon, area: p.area };
+        r = { ...r, lat: p.lat, lon: p.lon, city_id: p.city_id };
       } catch (err) { toast(err.message); return; } finally { session = null; }
     }
-    if (r.area && r.area !== state.area.id && state.areas.some((a) => a.id === r.area)) useArea(r.area);
+    if (r.city_id && r.city_id !== state.city.id) useCity(r.city_id);
     setPoint(which, { name: r.name, lat: r.lat, lon: r.lon });
     planTrip(true);
   };
-  const landmarkItems = () => state.area.landmarks.map((l) => ({ ...l, kind: "landmark", detail: `landmark · ${state.area.city}` }));
+  const landmarkItems = () => state.city.landmarks.map((l) => ({ ...l, kind: "landmark", detail: `landmark · ${state.city.name}` }));
   const query = debounce(async () => {
     const q = input.value.trim();
     if (!q) { items = landmarkItems(); active = -1; empty = ""; return render(); }
@@ -263,7 +269,7 @@ function setupSearch(inputSel, listSel, which) {
     const c = map ? map.getCenter() : null;
     const near = c ? `&lat=${c.lat.toFixed(5)}&lon=${c.lng.toFixed(5)}` : "";
     let failed = "";
-    try { items = await api(`/api/search?q=${encodeURIComponent(q)}&area=${state.area.id}${s}${near}`); }
+    try { items = await api(`/api/search?q=${encodeURIComponent(q)}&city=${state.city.id}${s}${near}`); }
     catch (err) { items = []; failed = err.message; } // show the error; never pretend there were no matches
     empty = items.length ? "" : q;
     searchError = failed;
@@ -284,44 +290,6 @@ function setupSearch(inputSel, listSel, which) {
 }
 
 /* ---------- planning ---------- */
-/* ---------- go anywhere: first trip in a new place downloads its street data ---------- */
-function showPreparing(resp, seq, fit) {
-  state.plan = null;
-  const job = resp.job;
-  if (!state.prepStarted || state.prepArea !== job.area) { state.prepStarted = Date.now(); state.prepArea = job.area; }
-  // Google's route straight away (unscored), so there's something to look at.
-  if (map.getSource("alt-routes")) {
-    const line = (coords) => ({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords.map(([a, b]) => [b, a]) } });
-    map.getSource("alt-routes").setData({ type: "FeatureCollection", features: (resp.preview || []).map((r) => line(r.geometry)) });
-    ["pieces", "weak"].forEach((id) => map.getSource(id).setData({ type: "FeatureCollection", features: [] }));
-    clearMarkers("labels"); clearMarkers("pois");
-    const pts = (resp.preview || []).flatMap((r) => r.geometry);
-    if (fit) fitTo(pts.length ? pts : [[state.origin.lat, state.origin.lon], [state.dest.lat, state.dest.lon]]);
-  }
-  const secs = Math.round((Date.now() - state.prepStarted) / 1000);
-  const failed = job.state === "failed";
-  $("#view").innerHTML = `<section class="prep-card${failed ? " failed" : ""}">
-      <div class="prep-head">${failed ? icon("error") : '<span class="spinner" aria-hidden="true"></span>'}
-        <b>${failed ? "Couldn’t get street data here" : "First trip here: getting street data"}</b></div>
-      <p>${esc(job.message)}</p>
-      ${failed ? "" : `<p class="muted small">SafeHer is downloading streets, lighting and open places for this area from OpenStreetMap so it can score routes. This happens once per area and usually takes 1–5 minutes${secs > 5 ? ` · ${secs}s so far` : ""}.</p>`}
-      ${(resp.preview || []).map((r) => `<div class="prep-preview">${icon("map")}<span><b>${esc(r.label)}</b> · ${fmtDist(r.distance_m)} · ${fmtDur(r.duration_min)}</span><span class="badge band-none">Not scored yet</span></div>`).join("")}
-      ${failed ? `<button class="btn" id="prepRetry">${icon("refresh")}Try again</button>` : ""}
-    </section>`;
-  $("#prepRetry")?.addEventListener("click", () => { state.prepStarted = null; planTrip(true); });
-  if (failed) return;
-  clearTimeout(state.prepTimer);
-  state.prepTimer = setTimeout(async () => {
-    if (seq !== state.planSeq) return; // the user changed the trip meanwhile
-    try {
-      const st = await api(`/api/prepare/${job.area}`);
-      if (seq !== state.planSeq) return;
-      if (st.state === "ready") { state.prepStarted = null; planTrip(true); }
-      else showPreparing({ ...resp, job: st }, seq, false);
-    } catch { showPreparing(resp, seq, false); }
-  }, resp.poll_ms || 2000);
-}
-
 async function planTrip(fit = false) {
   if (!state.origin || !state.dest) return;
   state.mode = "routes"; setChip(null); clearMarkers("pois"); hideBanner();
@@ -332,10 +300,9 @@ async function planTrip(fit = false) {
       origin: { lat: state.origin.lat, lon: state.origin.lon },
       destination: { lat: state.dest.lat, lon: state.dest.lon },
       depart_at: departIso(),
-      trip_name: `${state.origin.name} → ${state.dest.name}`.slice(0, 160),
     }) });
     if (seq !== state.planSeq) return; // a newer request superseded this one
-    if (plan.status === "preparing") return showPreparing(plan, seq, fit);
+    if (plan.area.city !== state.city.id) useCity(plan.area.city);
     const keepLabel = state.plan?.routes[state.selected]?.label;
     state.plan = plan;
     const again = plan.routes.findIndex((r) => r.label === keepLabel);
@@ -655,9 +622,9 @@ function openExplain() {
     <p>The second term stops one dark stretch from being averaged away. Lighting weighs more after sunset; weights blend over 30 minutes around sunrise and sunset.</p>
     <h3>Bands</h3><p>75–100 <b>More support</b> · 50–74 <b>Mixed</b> · 0–49 <b>Less support</b>. We never call a route “safe”.</p>
     <h3>Limits</h3><ul>
-      <li>Lighting is estimated for much of these areas; estimated stretches are marked low confidence.</li>
+      <li>Lighting is estimated for many streets; estimated stretches are marked low confidence.</li>
       <li>Opening hours are assumed from typical hours when not mapped.</li>
-      <li>Incident data is coarse and the same for every route in an area.</li></ul>
+      <li>Incident data is coarse: one figure per police district (Delhi), none below city level elsewhere.</li></ul>
     <p class="small muted">Weights version ${esc(m.weights_version)}. Full method: docs/DESIGN_SPEC.md §7–8.</p></div>`;
   $("#explainDialog").showModal();
 }
@@ -740,9 +707,9 @@ async function submitReport(pt) {
 
 async function loadReports() {
   clearMarkers("reports");
-  if (!state.area) return;
+  if (!state.city) return;
   try {
-    const rows = await api(`/api/reports?area=${state.area.id}`);
+    const rows = await api(`/api/reports?city=${state.city.id}`);
     rows.forEach((r) => {
       const c = REPORT_CATS[r.category];
       const el = document.createElement("div");
@@ -783,35 +750,35 @@ function onMapClick(e) {
   clickPopup = new maplibregl.Popup({ closeButton: false, offset: 6 }).setLngLat(e.lngLat).setDOMContent(el).addTo(map);
 }
 
-/* ---------- area & time ---------- */
-/* The area's configured default trip, else its first two landmarks, else nothing. */
-function defaultTrip(area) {
-  const byName = (n) => area.landmarks.find((l) => l.name === n);
-  if (area.default_trip) return area.default_trip.map(byName);
-  return [area.landmarks[0] || null, area.landmarks[1] || null];
+/* ---------- city & time ---------- */
+/* The city's configured default trip, else its first two landmarks, else nothing. */
+function defaultTrip(city) {
+  const byName = (n) => city.landmarks.find((l) => l.name === n);
+  if (city.default_trip) return city.default_trip.map(byName);
+  return [city.landmarks[0] || null, city.landmarks[1] || null];
 }
 
-function renderAreaSwitch() {
-  $("#areaSwitch").innerHTML = state.areas.map((a) =>
-    `<button role="tab" data-id="${a.id}" aria-selected="${a.id === state.area.id}">${esc(a.city === "Bengaluru" ? "Bengaluru" : a.city)}</button>`).join("");
-  $("#areaSwitch").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => switchArea(b.dataset.id)));
+function renderCitySwitch() {
+  $("#citySwitch").innerHTML = state.cities.map((c) =>
+    `<button role="tab" data-id="${c.id}" aria-selected="${c.id === state.city.id}">${esc(c.name)}</button>`).join("");
+  $("#citySwitch").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => switchCity(b.dataset.id)));
 }
 
-/* Make a configured area current (city switcher, overlays) without touching the trip. */
-function useArea(id) {
-  state.area = state.areas.find((a) => a.id === id) || state.area;
-  renderAreaSwitch(); loadOverlays(); loadReports();
+/* Make a city current (switcher, reports) without touching the trip. */
+function useCity(id) {
+  state.city = state.cities.find((c) => c.id === id) || state.city;
+  renderCitySwitch(); loadReports();
 }
 
-function switchArea(id, keepPoints = false, plan = true) {
-  state.area = state.areas.find((a) => a.id === id) || state.areas[0];
-  renderAreaSwitch();
+function switchCity(id, keepPoints = false, plan = true) {
+  state.city = state.cities.find((c) => c.id === id) || state.cities[0];
+  renderCitySwitch();
   if (!keepPoints) {
-    const [o, d] = defaultTrip(state.area);
+    const [o, d] = defaultTrip(state.city);
     setPoint("origin", o); setPoint("dest", d);
   }
   state.plan = null;
-  map.jumpTo({ center: [state.area.center[1], state.area.center[0]], zoom: 14 });
+  map.jumpTo({ center: [state.city.center[1], state.city.center[0]], zoom: 14 });
   loadOverlays(); loadReports();
   if (plan) planTrip(true);
 }
@@ -829,14 +796,14 @@ function updateTimeLabel() {
 /* ---------- URL state (shareable route links) ---------- */
 function writeHash() {
   const f = (p) => `${p.lat.toFixed(5)},${p.lon.toFixed(5)},${encodeURIComponent(p.name)}`;
-  const h = new URLSearchParams({ area: state.area.id, o: f(state.origin), d: f(state.dest) });
+  const h = new URLSearchParams({ city: state.city.id, o: f(state.origin), d: f(state.dest) });
   if (!state.isNow) h.set("t", String(state.departMin));
   history.replaceState(null, "", `#${h}`);
 }
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
   const parse = (v) => { if (!v) return null; const [lat, lon, ...n] = v.split(","); return { lat: +lat, lon: +lon, name: decodeURIComponent(n.join(",")) || "Dropped pin" }; };
-  return { area: h.get("area"), o: parse(h.get("o")), d: parse(h.get("d")), t: h.has("t") ? Number(h.get("t")) : null };
+  return { city: h.get("city") || h.get("area"), o: parse(h.get("o")), d: parse(h.get("d")), t: h.has("t") ? Number(h.get("t")) : null };
 }
 
 /* ---------- sheet (phones) ---------- */
@@ -854,31 +821,32 @@ function setupSheet() {
 
 /* ---------- boot ---------- */
 async function main() {
-  [state.areas, state.meta] = await Promise.all([api("/api/areas"), api("/api/meta")]);
+  [state.cities, state.meta] = await Promise.all([api("/api/cities"), api("/api/meta")]);
   $("#googleBrand").hidden = !googleOn("map_tiles");
   $("#helplines").innerHTML = state.meta.helplines.filter((h) => h.number !== "112")
     .map((h) => `<a href="tel:${h.number}"><b>${h.number}</b><span>${esc(h.label)}</span></a>`).join("");
 
   const hash = readHash();
-  state.area = state.areas.find((a) => a.id === hash.area) || state.areas.find((a) => a.id === state.meta.default_area) || state.areas[0];
+  state.city = state.cities.find((c) => c.id === hash.city) || state.cities.find((c) => c.id === state.meta.default_city) || state.cities[0];
   if (hash.t != null) { state.isNow = false; state.departMin = hash.t; }
   else if (state.meta.default_departure) { // config/app.json: e.g. "21:30" for night demos
     const [h, m] = state.meta.default_departure.split(":").map(Number);
     state.isNow = false; state.departMin = h * 60 + m;
   } else { state.isNow = true; }
 
-  renderAreaSwitch();
-  const preset = hash.o && hash.d ? [hash.o, hash.d] : defaultTrip(state.area);
+  renderCitySwitch();
+  const preset = hash.o && hash.d ? [hash.o, hash.d] : defaultTrip(state.city);
   $("#originInput").value = preset[0]?.name || ""; $("#destInput").value = preset[1]?.name || "";
   updateTimeLabel(); renderSkeleton();
-  await initMap(state.area.center);
+  await initMap(state.city.center);
   setupSheet();
   setupSearch("#originInput", "#originSuggest", "origin");
   setupSearch("#destInput", "#destSuggest", "dest");
-  renderAreaSwitch();
+  renderCitySwitch();
 
-  if (hash.o && hash.d) { setPoint("origin", hash.o); setPoint("dest", hash.d); switchArea(state.area.id, true); }
-  else switchArea(state.area.id);
+  if (hash.o && hash.d) { setPoint("origin", hash.o); setPoint("dest", hash.d); switchCity(state.city.id, true); }
+  else switchCity(state.city.id);
+  map.on("moveend", debounce(loadOverlays, 300));
   updateTimeLabel();
 
   const replan = debounce(() => planTrip(false), 250);

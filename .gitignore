@@ -46,8 +46,6 @@ demo/out/
 .hypothesis/
 backend/.hypothesis/
 
-# Trip areas downloaded on demand (local cache)
-data/areas/trip-*/
-
-# City databases built from the raw extracts (python -m safeher.citydata build)
-data/cities/
+# Reference database built by python -m safeher.data build
+data/safeher.duckdb
+data/safeher.building*

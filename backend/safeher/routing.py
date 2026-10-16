@@ -1,19 +1,16 @@
-"""Walking routes on the cached OSM graph: shortest, most-supported, and a distinct alternative."""
+"""Walking routes on a trip corridor's OSM graph (built by store.corridor_data): shortest, most-supported, and a distinct alternative."""
 
 from __future__ import annotations
 
-import ast
-import json
 from dataclasses import dataclass
-from functools import lru_cache
 
 import networkx as nx
 
 from . import config
-from .areas import AREAS, Area, get_area
+from .cities import Area
 from .geo import LatLon, haversine_m
-from .viirs import ViirsGrid, load_for as load_viirs
-from .pois import SAFE_SPACE_KINDS, STOP_KINDS, TRANSIT_KINDS, Poi, PointIndex, pois_from_osm
+from .viirs import ViirsGrid
+from .pois import Poi, PointIndex
 
 _R = config.scoring()["routing"]
 MAX_SNAP_M = float(_R["max_snap_m"])  # origin/destination must be this close to a walkable street
@@ -54,46 +51,6 @@ class AreaData:
             raise ValueError(f"no walkable street within {MAX_SNAP_M} m of {p}")
         d, n = hit
         return n, d
-
-
-def _parse_listish(value):
-    if isinstance(value, str) and value.startswith("["):
-        try:
-            return ast.literal_eval(value)
-        except (ValueError, SyntaxError):
-            return value
-    return value
-
-
-@lru_cache(maxsize=12)
-def load_area(area_id: str) -> AreaData:
-    import osmnx as ox
-
-    area = get_area(area_id)
-    graph_path = area.dir / "walk.graphml"
-    if not graph_path.exists():
-        raise FileNotFoundError(f"{area_id} not cached; run: python -m safeher.fetch {area_id}")
-    graph = ox.load_graphml(graph_path)
-    for _, _, d in graph.edges(data=True):
-        for k in ("lit", "highway", "name", "sidewalk", "footway"):
-            if k in d:
-                d[k] = _parse_listish(d[k])
-    pois = pois_from_osm(json.loads((area.dir / "pois.json").read_text()))
-
-    def index(kinds: set[str]) -> PointIndex[Poi]:
-        return PointIndex((p.latlon, p) for p in pois if p.kind in kinds)
-
-    return AreaData(
-        area=area,
-        graph=graph,
-        nodes=PointIndex(((d["y"], d["x"]), n) for n, d in graph.nodes(data=True)),
-        pois=pois,
-        lamps=index({"street_lamp"}),
-        transit=index(TRANSIT_KINDS),
-        safe_spaces=index(SAFE_SPACE_KINDS),
-        stops=index(STOP_KINDS),
-        viirs=load_viirs(area),
-    )
 
 
 def edge_between(data: AreaData, u: int, v: int, weight: str | None = None) -> Edge:

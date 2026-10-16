@@ -20,9 +20,9 @@ from collections import defaultdict
 
 import httpx
 
-from safeher.areas import AREAS
+from safeher import store
+from safeher.cities import CITIES, corridor
 from safeher.geo import haversine_m
-from safeher.routing import load_area
 
 TIMES = ["07:30", "13:00", "18:10", "21:30", "23:45"]
 QUERIES = ["metro", "road", "hospital", "starbucks", "12th main", "aurobindo", "saket", "cafe"]
@@ -31,8 +31,9 @@ QUERIES = ["metro", "road", "hospital", "starbucks", "12th main", "aurobindo", "
 def trip_pool(n: int, seed: int) -> list[tuple[str, tuple, tuple]]:
     rng = random.Random(seed)
     pool = []
-    for area_id in sorted(AREAS):
-        data = load_area(area_id)
+    for area_id, c in sorted(CITIES.items()):  # random trips around each city's default trip
+        lm = {l.name: (l.lat, l.lon) for l in c.landmarks}
+        data = store.corridor_data(corridor(*(lm[n] for n in c.default_trip)))
         nodes = list(data.graph.nodes)
         while sum(p[0] == area_id for p in pool) < n:
             o, d = (data.node_latlon(rng.choice(nodes)) for _ in range(2))
@@ -71,12 +72,13 @@ async def user(uid: int, base: str, stop_at: float, pool, stats: Stats):
                     "depart_at": f"2026-10-14T{rng.choice(TIMES)}:00"}
             await stats.hit(c, "plan", "POST", "/api/plan", json=body)
             await stats.hit(c, "explain", "POST", "/api/explain", json={**body, "lang": rng.choice(["en", "hi"])})
-            await stats.hit(c, "search", "GET", "/api/search", params={"q": rng.choice(QUERIES), "area": area_id})
+            await stats.hit(c, "search", "GET", "/api/search", params={"q": rng.choice(QUERIES), "city": area_id})
             await stats.hit(c, "nearby", "GET", "/api/nearby", params={
                 "lat": o[0], "lon": o[1], "kind": rng.choice(["police", "toilets", "hospital", "pharmacy", "open_places"]),
                 "depart_at": body["depart_at"]})
             if rng.random() < 0.2:
-                await stats.hit(c, "layers", "GET", f"/api/layers/{area_id}")
+                await stats.hit(c, "layers", "GET", "/api/layers", params={
+                    "south": o[0] - 0.01, "west": o[1] - 0.01, "north": o[0] + 0.01, "east": o[1] + 0.01})
             if rng.random() < 0.3:
                 r = await stats.hit(c, "share_create", "POST", "/api/trips", json={"route": [[o[1], o[0]], [d[1], d[0]]]})
                 if r is not None and r.status_code == 201:
@@ -121,7 +123,7 @@ def main():
     ap.add_argument("--base", default="http://localhost:8765")
     ap.add_argument("--users", type=int, default=40)
     ap.add_argument("--seconds", type=int, default=60)
-    ap.add_argument("--trips", type=int, default=30, help="random trips per area")
+    ap.add_argument("--trips", type=int, default=30, help="random trips per city")
     ap.add_argument("--seed", type=int, default=int(time.time()))
     sys.exit(asyncio.run(main_async(ap.parse_args())))
 

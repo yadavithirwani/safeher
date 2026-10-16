@@ -1,27 +1,25 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from safeher import api
-from safeher.areas import AREAS
+from safeher import api, store
+from safeher.cities import CITIES
 
-pytestmark = pytest.mark.skipif(
-    not all((a.dir / "walk.graphml").exists() for a in AREAS.values()),
-    reason="OSM snapshots not fetched (python -m safeher.fetch)",
-)
+pytestmark = pytest.mark.skipif(not store.available(), reason="run: python -m safeher.data build")
 
 HAUZ_KHAS, SAKET = {"lat": 28.5433, "lon": 77.2067}, {"lat": 28.5286, "lon": 77.2195}
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(api, "REPORTS_FILE", tmp_path / "reports.jsonl")
+def client():
     return TestClient(api.app)
 
 
-def test_areas_have_landmarks(client):
-    areas = client.get("/api/areas").json()
-    assert {a["id"] for a in areas} == set(AREAS)
-    assert all(len(a["landmarks"]) >= 2 for a in areas)
+def test_cities_have_landmarks(client):
+    cities = client.get("/api/cities").json()
+    assert {c["id"] for c in cities} == set(CITIES)
+    assert all(len(c["landmarks"]) >= 2 for c in cities)
+    meta = client.get("/api/meta").json()
+    assert meta["default_city"] in CITIES and "default_area" not in meta and "anywhere" not in meta
 
 
 def test_plan_returns_routes_with_pieces(client):
@@ -35,15 +33,27 @@ def test_plan_returns_routes_with_pieces(client):
         assert any(p["coords"][0] == w["start"] for p in route["pieces"])
 
 
-def test_plan_outside_demo_areas_starts_preparing(client):
-    """Go-anywhere: a trip outside the configured areas starts a street-data download (stubbed in tests)."""
+def test_plan_outside_supported_cities_is_refused_clearly(client):
     r = client.post("/api/plan", json={"origin": {"lat": 19.07, "lon": 72.87}, "destination": {"lat": 19.08, "lon": 72.88}})
-    assert r.status_code == 202 and r.json()["status"] == "preparing" and r.json()["job"]["area"].startswith("trip-")
+    assert r.status_code == 422 and "Delhi and Bengaluru only" in r.json()["detail"]
+    assert client.get("/api/prepare/trip-0123456789").status_code == 404  # the download queue is gone
+
+
+def test_plan_across_two_cities_is_refused(client):
+    r = client.post("/api/plan", json={"origin": HAUZ_KHAS, "destination": {"lat": 12.9784, "lon": 77.6408}})
+    assert r.status_code == 422 and "same city" in r.json()["detail"]
 
 
 def test_plan_too_far_to_walk_is_422(client):
-    r = client.post("/api/plan", json={"origin": {"lat": 19.07, "lon": 72.87}, "destination": {"lat": 19.20, "lon": 72.95}})
+    r = client.post("/api/plan", json={"origin": HAUZ_KHAS, "destination": {"lat": 28.70, "lon": 77.30}})
     assert r.status_code == 422 and "plans walks up to" in r.json()["detail"]
+
+
+def test_any_trip_inside_a_city_plans_without_downloading(client):
+    """Not just the landmarks: two points across town in Delhi (Connaught Place → India Gate)."""
+    r = client.post("/api/plan", json={"origin": {"lat": 28.6315, "lon": 77.2167},
+                                       "destination": {"lat": 28.6129, "lon": 77.2295}, "depart_at": "2026-10-13T21:30:00"})
+    assert r.status_code == 200 and r.json()["routes"] and r.json()["area"]["city"] == "delhi"
 
 
 def test_search_finds_landmarks_first(client):
@@ -71,6 +81,8 @@ def test_report_is_snapped_and_changes_scores(client):
     after = {r["label"]: r for r in client.post("/api/plan", json=body).json()["routes"]}
     assert after[before[0]["label"]]["score"] <= before[0]["score"]
     assert len(client.get("/api/reports").json()) == 1
+    assert len(client.get("/api/reports", params={"city": "delhi"}).json()) == 1
+    assert client.get("/api/reports", params={"city": "bengaluru"}).json() == []
 
 
 def test_report_validation(client):
@@ -79,8 +91,12 @@ def test_report_validation(client):
 
 
 def test_layers_and_web_app(client):
-    fc = client.get("/api/layers/blr-indiranagar-mg-road").json()
+    box = {"south": 12.965, "west": 77.60, "north": 12.985, "east": 77.645}  # Indiranagar → MG Road
+    fc = client.get("/api/layers", params=box).json()
     assert any(f["properties"]["kind"] == "street_lamp" for f in fc["features"])
+    assert all(box["west"] <= f["geometry"]["coordinates"][0] <= box["east"] for f in fc["features"])
+    whole_city = {"south": 12.83, "west": 77.45, "north": 13.15, "east": 77.78}
+    assert client.get("/api/layers", params=whole_city).status_code == 422  # zoom in first
     page = client.get("/")
     assert page.status_code == 200 and "SafeHer" in page.text
     assert page.headers["cache-control"] == "no-cache"
@@ -101,6 +117,6 @@ def test_explain_endpoint_returns_checked_text(client, monkeypatch):
 
 
 def test_report_far_from_any_street_is_refused(client):
-    """Found by fuzzing: a tap in the middle of Halasuru Lake used to crash the server."""
-    r = client.post("/api/reports", json={"lat": 12.986328125, "lon": 77.62890625, "category": "harassment"})
+    """Found by fuzzing: a tap far from streets used to crash the server. (Turahalli forest, >300 m from any street.)"""
+    r = client.post("/api/reports", json={"lat": 12.8625, "lon": 77.4945, "category": "harassment"})
     assert r.status_code == 422 and "near a street" in r.json()["detail"]

@@ -6,41 +6,38 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager, suppress
 import copy
-import json
 import re
 import threading
 import time
 from collections import OrderedDict
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
-from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi import Path as PathParam
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import trips
 from . import signals as sig
-from . import config, google, prepare
-from .areas import AREAS, area_for, get_area, timezone_at
+from . import config, google, store, userdb
+from .cities import CITIES, Unsupported, city_at, corridor, supported_list
 from .config import REPO_ROOT
 from .geo import LatLon, haversine_m
 from .explain import LANGUAGES, ExplainFailed, explain
-from .plan import DISCLAIMER, KIND_LABELS, WALK_M_PER_MIN, plan
-from .pois import SAFE_SPACE_KINDS
-from .routing import load_area
+from .plan import DISCLAIMER, KIND_LABELS, plan
+from .pois import pois_from_osm
 from .search import search as place_search
 from .scoring import BANDS, DAY_WEIGHTS, NIGHT_WEIGHTS, WEIGHTS_VERSION
 
 WEB_DIR = REPO_ROOT / "app" / "web"
-REPORTS_FILE = Path(__file__).resolve().parents[1] / "var" / "reports.jsonl"
 
 APP = config.app()
 GOOGLE = APP["google"]
-ANYWHERE = APP["anywhere"]
+DEFAULT_CITY = APP["default_city"]
+if DEFAULT_CITY not in CITIES:
+    raise RuntimeError(f"config/app.json default_city {DEFAULT_CITY!r} is not in config/cities.json")
 
 
 def g_on(feature: str) -> bool:
@@ -51,11 +48,9 @@ NEARBY_RADIUS_M = float(APP["nearby"]["search_radius_m"])
 GOOGLE_ROUTE_TTL_S = 300
 DEPARTURE_WINDOW_S = float(APP["departure_window_days"]) * 86400
 DUPLICATE_MERGE_M = float(APP["nearby"]["duplicate_merge_m"])
+LAYERS_MAX_SQ_DEG = 0.05 * 0.05  # about 5 x 5 km: more than that is too many lamps to draw
 ENDPOINT_LANDMARK_M = float(APP["explain"]["endpoint_landmark_m"])
-
-
-def _area_list() -> str:
-    return ", ".join(f"{a.name} ({a.city})" for a in AREAS.values())
+REPORT_SNAP_M = float(config.scoring()["routing"]["max_snap_m"])
 
 
 async def clean_expired_trips():
@@ -92,37 +87,31 @@ async def revalidate_web_assets(request, call_next):
     return response
 
 
-# --- Community reports (file-backed for the prototype) -------------------------------------
+# --- Community reports (user database) ------------------------------------------------------
 
+REPORT_FIELDS = ("id", "lat", "lon", "category", "created_at", "verification")
+_reports_cache: tuple[tuple, list] = ((), [])
 _reports_lock = threading.Lock()
 
 
-def _load_reports() -> list[dict]:
-    if not REPORTS_FILE.exists():
-        return []
-    return [json.loads(line) for line in REPORTS_FILE.read_text().splitlines() if line.strip()]
-
-
-_reports_cache: tuple[tuple, list] = ((), [])
-
-
 def _reports_version() -> tuple:
-    try:
-        st = REPORTS_FILE.stat()
-        return (str(REPORTS_FILE), st.st_mtime_ns, st.st_size)
-    except FileNotFoundError:
-        return (str(REPORTS_FILE), 0, 0)
+    """Changes whenever a report is added or removed (cheap: one indexed query)."""
+    with userdb.database() as db:
+        n, last = db.execute("SELECT count(*), max(id) FROM reports").fetchone()
+    return (str(userdb.DB_FILE), n, last)
 
 
 def _reports_for_planning() -> list[tuple[LatLon, sig.Report]]:
-    """Parsed once per change of the reports file, not on every request."""
+    """Parsed once per change of the reports table, not on every request."""
     global _reports_cache
     version = _reports_version()
-    if _reports_cache[0] != version:
-        rows = [((r["lat"], r["lon"]), sig.Report(r["category"], datetime.fromisoformat(r["created_at"]),
-                                                  r["verification"])) for r in _load_reports()]
-        _reports_cache = (version, rows)
-    return _reports_cache[1]
+    with _reports_lock:
+        if _reports_cache[0] != version:
+            with userdb.database() as db:
+                rows = db.execute("SELECT lat, lon, category, created_at, verification FROM reports").fetchall()
+            _reports_cache = (version, [((r["lat"], r["lon"]), sig.Report(r["category"],
+                                         datetime.fromisoformat(r["created_at"]), r["verification"])) for r in rows])
+        return _reports_cache[1]
 
 
 # Planned trips, shared by /api/plan and /api/explain (which used to re-plan from scratch).
@@ -134,6 +123,7 @@ PLAN_CACHE_MAX = 256
 
 
 def _planned(o: LatLon, d: LatLon, when: datetime) -> dict:
+    corridor(o, d)  # refuse unsupported trips before spending a Google call on them
     key = (round(o[0], 6), round(o[1], 6), round(d[0], 6), round(d[1], 6),
            when.astimezone(timezone.utc).replace(second=0, microsecond=0).isoformat(), _reports_version(),
            g_on("routes"))
@@ -166,7 +156,6 @@ class PlanRequest(BaseModel):
     origin: Point
     destination: Point
     depart_at: datetime | None = None  # ISO 8601; naive = local time at the origin; omitted = now
-    trip_name: str | None = Field(default=None, max_length=160)  # names a newly downloaded trip area
 
 
 class ExplainRequest(PlanRequest):
@@ -183,14 +172,14 @@ class ReportRequest(BaseModel):
 # --- Endpoints ----------------------------------------------------------------------------
 
 
-@app.get("/api/areas")
-def areas():
+@app.get("/api/cities")
+def cities():
+    """Supported cities: trips must start and end inside one of these."""
     return [
-        {"id": a.id, "city": a.city, "name": a.name, "center": a.center,
-         "bbox": [a.west, a.south, a.east, a.north],
-         "timezone": a.timezone, "default_trip": a.default_trip,
-         "landmarks": [{"name": lm.name, "lat": lm.lat, "lon": lm.lon} for lm in a.landmarks]}
-        for a in AREAS.values()
+        {"id": c.id, "name": c.name, "center": c.center, "bbox": [c.west, c.south, c.east, c.north],
+         "timezone": c.timezone, "default_trip": c.default_trip,
+         "landmarks": [{"name": lm.name, "lat": lm.lat, "lon": lm.lon} for lm in c.landmarks]}
+        for c in CITIES.values()
     ]
 
 
@@ -203,7 +192,7 @@ def meta():
         "bands": [{"min": m, "label": label} for m, label in BANDS],
         "report_categories": list(sig.REPORT_SEVERITY),
         "helplines": APP["helplines"],
-        "default_area": APP["default_area"] if APP["default_area"] in AREAS else next(iter(AREAS)),
+        "default_city": DEFAULT_CITY,
         "default_departure": APP["default_departure"],
         "basemaps": APP["basemaps"],
         "nearby_radius_m": NEARBY_RADIUS_M,
@@ -211,33 +200,32 @@ def meta():
         "disclaimer": DISCLAIMER,
         "google": {f: g_on(f) for f in GOOGLE["features"]},
         "google_autocomplete_min_chars": GOOGLE["autocomplete_min_chars"],
-        "anywhere": {k: ANYWHERE[k] for k in ("enabled", "max_trip_km", "poll_interval_ms")},
+        "max_trip_km": APP["trips"]["max_trip_km"],
     }
 
 
 @app.get("/api/search")
-def search(q: str = Query(min_length=1, max_length=80), area: str | None = None,
+def search(q: str = Query(min_length=1, max_length=80), city: str | None = None,
            limit: int = APP["search"]["default_limit"], session: str | None = Query(default=None, max_length=64),
            lat: float | None = Query(default=None, ge=-90, le=90), lon: float | None = Query(default=None, ge=-180, le=180)):
-    """Places, streets and landmarks. With `area`, searches it first; if nothing matches there,
-    results from the other demo areas come back flagged `other_area` so the app can offer a switch."""
-    if area and area not in AREAS:
-        raise HTTPException(404, "unknown area")
-    first = [area] if area else list(AREAS)
-    results = place_search(q, first, limit)
-    if not results and area:
-        results = [{**r, "other_area": True} for r in place_search(q, [a for a in AREAS if a != area], limit)]
+    """Places, streets and landmarks. Searches `city` first (default: the one at lat/lon, else the
+    default city); if nothing matches there, other cities' results come back flagged `other_city`."""
+    if city and city not in CITIES:
+        raise HTTPException(404, "unknown city")
+    here = CITIES[city] if city else (city_at(lat, lon) if lat is not None and lon is not None else None) \
+        or CITIES[DEFAULT_CITY]
+    near = (lat, lon) if lat is not None and lon is not None else None
+    results = place_search(q, [here.id], limit, near)
+    if not results:
+        results = [{**r, "other_city": True} for r in place_search(q, [c for c in CITIES if c != here.id], limit)]
     if g_on("autocomplete") and len(q.strip()) >= GOOGLE["autocomplete_min_chars"]:
-        a = AREAS.get(area) if area else None
-        near = (lat, lon) if lat is not None and lon is not None else (a.center if a else None)
-        # Go-anywhere: bias towards where the user is looking; otherwise stay inside the demo area.
-        bbox = None if ANYWHERE["enabled"] else ((a.south, a.west, a.north, a.east) if a else None)
+        # Restricted to the city, so every Google suggestion is somewhere SafeHer can plan.
         try:
-            preds = google.client().autocomplete(q.strip(), bbox, _session(session), near=near,
-                                                 radius_m=float(ANYWHERE["google_search_bias_km"]) * 1000)
+            preds = google.client().autocomplete(q.strip(), (here.south, here.west, here.north, here.east),
+                                                 _session(session))
         except google.GoogleError as e:
             raise HTTPException(502, f"Google search failed: {e}") from e
-        local_names = {r["name"].lower() for r in results}
+        local_names = {r["name"].lower() for r in results if not r.get("other_city")}  # Google's are in this city
         for pr in preds:
             if pr["main"].lower() in local_names:
                 continue
@@ -247,8 +235,8 @@ def search(q: str = Query(min_length=1, max_length=80), area: str | None = None,
 
 
 def _parse_departure(depart_at: datetime | None, p: LatLon) -> datetime:
-    area = area_for(*p)
-    tz = area.tz if area else ZoneInfo(timezone_at(*p))
+    city = city_at(*p)
+    tz = city.tz if city else CITIES[DEFAULT_CITY].tz  # outside every city the trip is refused anyway
     now = datetime.now(timezone.utc)
     if depart_at is None:
         return now.astimezone(tz)
@@ -262,35 +250,10 @@ def _parse_departure(depart_at: datetime | None, p: LatLon) -> datetime:
 def plan_trip(req: PlanRequest):
     o, d = (req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)
     when = _parse_departure(req.depart_at, o)
-    if ANYWHERE["enabled"]:
-        try:
-            area, job = prepare.ensure(o, d, req.trip_name)
-        except prepare.TooFar as e:
-            raise HTTPException(422, str(e)) from e
-        if area is None:  # first trip here: street data is downloading
-            return JSONResponse(status_code=202, content={
-                "status": "preparing", "job": job, "poll_ms": ANYWHERE["poll_interval_ms"],
-                "preview": _google_preview(o, d), "google_map": g_on("map_tiles")})
     try:
         return _planned(o, d, when)
-    except ValueError as e:
+    except (Unsupported, ValueError) as e:
         raise HTTPException(422, str(e)) from e
-
-
-@app.get("/api/prepare/{area_id}")
-def prepare_status(area_id: str = PathParam(pattern=r"^trip-[0-9a-f]{10}$")):
-    return prepare.status(area_id)
-
-
-def _google_preview(o: LatLon, d: LatLon) -> list[dict]:
-    """Google's walking route, shown (unscored) while street data downloads. Google map only."""
-    external, _ = _google_routes(o, d)
-    out = []
-    for r in external:
-        dist = sum(haversine_m(a, b) for a, b in zip(r["points"], r["points"][1:]))
-        out.append({"label": r["label"], "distance_m": round(dist), "duration_min": round(round(dist) / WALK_M_PER_MIN),
-                    "geometry": [[round(a, 6), round(b, 6)] for a, b in r["points"]]})
-    return out
 
 
 _route_cache: "OrderedDict[tuple, list]" = OrderedDict()
@@ -322,13 +285,13 @@ def _google_routes(o: LatLon, d: LatLon) -> tuple[list[dict], str | None]:
 _place_names: dict[str, set[str]] = {}
 
 
-def _area_place_names(area_id: str) -> set[str]:
-    """Every named place in the area: an explanation may only name the ones in its own facts."""
-    if area_id not in _place_names:
-        names = {p.name for p in load_area(area_id).pois if p.name}
-        names |= {lm.name for lm in get_area(area_id).landmarks}
-        _place_names[area_id] = names
-    return _place_names[area_id]
+def _city_place_names(city_id: str) -> set[str]:
+    """Every named place in the city: an explanation may only name the ones in its own facts."""
+    if city_id not in _place_names:
+        names = {(p["tags"].get("name:en") or p["tags"].get("name")) for p in store.places(city_id)}
+        names |= {lm.name for lm in CITIES[city_id].landmarks}
+        _place_names[city_id] = {n for n in names if n}
+    return _place_names[city_id]
 
 
 @app.post("/api/explain")
@@ -338,13 +301,14 @@ def explain_trip(req: ExplainRequest):
     when = _parse_departure(req.depart_at, o)
     try:
         p = _planned(o, d, when)  # same routes as the cards, including any Google route
-    except ValueError as e:
+    except (Unsupported, ValueError) as e:
         raise HTTPException(422, str(e)) from e
     # Landmarks at the start or end of the trip may be named; any other place not in the facts may not.
-    at_endpoints = {lm.name for lm in get_area(p["area"]["id"]).landmarks
+    city = p["area"]["city"]
+    at_endpoints = {lm.name for lm in CITIES[city].landmarks
                     if min(haversine_m((lm.lat, lm.lon), o), haversine_m((lm.lat, lm.lon), d)) < ENDPOINT_LANDMARK_M}
     try:
-        result = explain(p, req.lang, forbidden_names=_area_place_names(p["area"]["id"]) - at_endpoints)
+        result = explain(p, req.lang, forbidden_names=_city_place_names(city) - at_endpoints)
     except ExplainFailed as e:
         raise HTTPException(502, str(e)) from e
     return {k: result[k] for k in ("text", "provider", "model", "lang", "checked")}
@@ -358,19 +322,18 @@ def nearby(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180
            depart_at: datetime | None = None,
            limit: int = APP["nearby"]["default_limit"]):
     when = _parse_departure(depart_at, (lat, lon))
-    area = area_for(lat, lon)
+    city = city_at(lat, lon)
+    if city is None:
+        raise HTTPException(422, f"SafeHer has street data for {supported_list()} only.")
+    local = when.astimezone(city.tz)
     live = abs((when - datetime.now(timezone.utc)).total_seconds()) < 1800
-    if g_on("nearby") and (live or area is None):
-        # Google's "open now" is live: used for trips leaving about now, or wherever SafeHer has no data.
+    if g_on("nearby") and live:
+        # Google's "open now" is live, so it's used for trips leaving about now.
         try:
-            local = when.astimezone(area.tz if area else ZoneInfo(timezone_at(lat, lon)))
-            return _google_nearby(lat, lon, kind, local, limit, area, live)
+            return _google_nearby(lat, lon, kind, local, limit, city, live)
         except google.GoogleError as e:
             raise HTTPException(502, f"Google nearby search failed: {e}") from e
-    if area is None:
-        raise HTTPException(422, "SafeHer has no street data here yet. Plan a trip here first.")
-    data = load_area(area.id)
-    local = when.astimezone(data.area.tz)
+    data = store.corridor_data(corridor((lat, lon), (lat, lon)))  # the city's data around this point
     index = data.safe_spaces if kind == "open_places" else data.stops
     out = []
     for dist, poi in index.within((lat, lon), NEARBY_RADIUS_M):
@@ -394,12 +357,12 @@ def nearby(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180
     return {"kind": kind, "at": local.isoformat(timespec="minutes"), "source": "openstreetmap", "results": out}
 
 
-def _google_nearby(lat, lon, kind, local, limit, area, live=True):
+def _google_nearby(lat, lon, kind, local, limit, city, live=True):
     places = google.client().nearby(lat, lon, GOOGLE["nearby_types"][kind], NEARBY_RADIUS_M, limit * 2)
     out = []
     wanted = set(GOOGLE["nearby_types"][kind])
     for g in places:
-        if area is not None and not area.contains(g["lat"], g["lon"]):
+        if not city.contains(g["lat"], g["lon"]):
             continue
         if not live:
             g = {**g, "open": None}  # Google only knows "open now", not open at another time
@@ -471,10 +434,11 @@ def google_place(place_id: str = PathParam(pattern=r"^[A-Za-z0-9_-]{10,300}$"),
         if e.status in (400, 404):  # malformed or unknown place ID: the client's mistake, not ours
             raise HTTPException(404, "Place not found.") from e
         raise HTTPException(502, f"Google place lookup failed: {e}") from e
-    a = area_for(p["lat"], p["lon"])
-    if a is None and not ANYWHERE["enabled"]:
-        raise HTTPException(422, f"{p['name'] or 'That place'} is outside the demo areas: {_area_list()}.")
-    return {**p, "area": a.id if a and a.id in AREAS else None, "city": a.city if a else None}
+    c = city_at(p["lat"], p["lon"])
+    if c is None:
+        raise HTTPException(422, f"{p['name'] or 'That place'} is outside {supported_list()}, "
+                                 "where SafeHer has street data.")
+    return {**p, "city": c.name, "city_id": c.id}
 
 
 @app.get("/api/google/streetview/available")
@@ -496,49 +460,53 @@ def google_streetview(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-
         raise HTTPException(502, f"Street View unavailable: {e}") from e
 
 
-@app.get("/api/layers/{area_id}")
-def layers(area_id: str):
-    """Static map overlays as GeoJSON: street lamps, police stations, washrooms."""
-    if area_id not in AREAS:
-        raise HTTPException(404, "unknown area")
-    data = load_area(area_id)
-    features = [
-        {"type": "Feature", "geometry": {"type": "Point", "coordinates": [p.lon, p.lat]},
-         "properties": {"kind": p.kind, "name": p.name or KIND_LABELS.get(p.kind, p.kind).capitalize()}}
-        for p in data.pois if p.kind in {"street_lamp", "police", "toilets"}
-    ]
+@app.get("/api/layers")
+def layers(south: float = Query(ge=-90, le=90), west: float = Query(ge=-180, le=180),
+           north: float = Query(ge=-90, le=90), east: float = Query(ge=-180, le=180)):
+    """Map overlays for the visible map (street lamps, police stations, washrooms) as GeoJSON."""
+    c = city_at((south + north) / 2, (west + east) / 2)
+    if c is None:
+        return {"type": "FeatureCollection", "features": []}
+    if (north - south) * (east - west) > LAYERS_MAX_SQ_DEG or north < south or east < west:
+        raise HTTPException(422, "Zoom in to see map layers.")
+    kinds = {"street_lamp", "police", "toilets"}
+    features = []
+    for raw in store.places(c.id):
+        if not (south <= raw["lat"] <= north and west <= raw["lon"] <= east):
+            continue
+        for poi in pois_from_osm([raw]):
+            if poi.kind in kinds:
+                features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [poi.lon, poi.lat]},
+                                 "properties": {"kind": poi.kind,
+                                                "name": poi.name or KIND_LABELS.get(poi.kind, poi.kind).capitalize()}})
     return {"type": "FeatureCollection", "features": features}
 
 
 @app.get("/api/reports")
-def list_reports(area: str | None = None):
-    rows = _load_reports()
-    if area:
-        a = AREAS.get(area)
-        rows = [r for r in rows if a and a.contains(r["lat"], r["lon"])]
-    return [{k: r[k] for k in ("id", "lat", "lon", "category", "created_at", "verification")} for r in rows]
+def list_reports(city: str | None = None):
+    if city and city not in CITIES:
+        raise HTTPException(404, "unknown city")
+    with userdb.database() as db:
+        rows = db.execute("SELECT * FROM reports" + (" WHERE city = ?" if city else "") + " ORDER BY id",
+                          (city,) if city else ()).fetchall()
+    return [{k: r[k] for k in REPORT_FIELDS} for r in rows]
 
 
 @app.post("/api/reports", status_code=201)
 def create_report(req: ReportRequest):
-    area = area_for(req.lat, req.lon)
-    if area is None:
-        raise HTTPException(422, f"Reports are only accepted inside the demo areas: {_area_list()}.")
-    data = load_area(area.id)
-    try:
-        node, dist = data.snap((req.lat, req.lon))  # privacy: store the street node, not the exact tap
-    except ValueError as e:
-        raise HTTPException(422, "Reports need to be on or near a street.") from e
-    lat, lon = data.node_latlon(node)
-    with _reports_lock:
-        rows = _load_reports()
-        row = {"id": len(rows) + 1, "lat": lat, "lon": lon, "category": req.category,
-               "created_at": datetime.now(timezone.utc).isoformat(), "verification": "pending",
-               "note": req.note}
-        REPORTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with REPORTS_FILE.open("a") as f:
-            f.write(json.dumps(row) + "\n")
-    return {k: row[k] for k in ("id", "lat", "lon", "category", "created_at", "verification")}
+    c = city_at(req.lat, req.lon)
+    if c is None:
+        raise HTTPException(422, f"Reports are only accepted in {supported_list()}.")
+    # Privacy: store the nearest street point, not the exact tap.
+    snapped = store.nearest_street_point(c, (req.lat, req.lon), REPORT_SNAP_M)
+    if snapped is None:
+        raise HTTPException(422, "Reports need to be on or near a street.")
+    row = {"city": c.id, "lat": snapped[0], "lon": snapped[1], "category": req.category,
+           "created_at": datetime.now(timezone.utc).isoformat(), "verification": "pending", "note": req.note}
+    with userdb.database() as db:
+        row["id"] = db.execute("INSERT INTO reports(city, lat, lon, category, created_at, verification, note) "
+                               "VALUES (:city, :lat, :lon, :category, :created_at, :verification, :note)", row).lastrowid
+    return {k: row[k] for k in REPORT_FIELDS}
 
 
 # --- Web app ------------------------------------------------------------------------------

@@ -135,20 +135,20 @@ def fmt_clock(minutes: int) -> str:
 class Story:
     """Everything the captions say, read from the running API so they always match the app."""
     base: str
-    area: dict
+    city: dict
     origin: dict
     dest: dict
     night_min: int
     day_min: int
     late_min: int
-    lamps_area: dict | None
+    lamps_city: dict | None
     lamp_center: tuple[float, float] | None
     lamp_count: int
     helplines: list[dict]
 
     def url(self) -> str:
         f = lambda p: f"{p['lat']:.5f},{p['lon']:.5f},{quote(p['name'])}"  # noqa: E731
-        return f"{self.base}/#" + urlencode({"area": self.area["id"], "o": f(self.origin), "d": f(self.dest),
+        return f"{self.base}/#" + urlencode({"city": self.city["id"], "o": f(self.origin), "d": f(self.dest),
                                              "t": self.night_min})
 
     def compare(self, minutes: int) -> tuple[dict, dict]:
@@ -163,32 +163,35 @@ class Story:
 
 def build_story(base: str, night: str | None, day: str, late: str) -> Story:
     get = lambda path: httpx.get(f"{base}{path}", timeout=60).raise_for_status().json()  # noqa: E731
-    meta, areas = get("/api/meta"), get("/api/areas")
-    area = next(a for a in areas if a["id"] == meta["default_area"])
-    by_name = {lm["name"]: lm for lm in area["landmarks"]}
-    trip = area.get("default_trip") or [lm["name"] for lm in area["landmarks"][:2]]
-    lamps_area, lamp_center, lamp_count = None, None, 0
-    for a in areas:  # the area with the most mapped street lamps gets the night-lamps scene
-        lamps = [f["geometry"]["coordinates"] for f in get(f"/api/layers/{a['id']}")["features"]
+    meta, cities = get("/api/meta"), get("/api/cities")
+    city = next(c for c in cities if c["id"] == meta["default_city"])
+    by_name = {lm["name"]: lm for lm in city["landmarks"]}
+    trip = city.get("default_trip") or [lm["name"] for lm in city["landmarks"][:2]]
+    lamps_city, lamp_center, lamp_count = None, None, 0
+    for c in cities:  # the city whose default trip has the most mapped street lamps gets the night-lamps scene
+        lms = [lm for lm in c["landmarks"] if lm["name"] in (c.get("default_trip") or [])] or c["landmarks"][:2]
+        lats, lons = [lm["lat"] for lm in lms], [lm["lon"] for lm in lms]
+        box = f"south={min(lats) - .01}&west={min(lons) - .01}&north={max(lats) + .01}&east={max(lons) + .01}"
+        lamps = [f["geometry"]["coordinates"] for f in get(f"/api/layers?{box}")["features"]
                  if f["properties"]["kind"] == "street_lamp"]
         if len(lamps) > lamp_count:
-            lons, lats = sorted(c[0] for c in lamps), sorted(c[1] for c in lamps)
-            lamps_area, lamp_center, lamp_count = a, (lats[len(lats) // 2], lons[len(lons) // 2]), len(lamps)
+            lons, lats = sorted(x[0] for x in lamps), sorted(x[1] for x in lamps)
+            lamps_city, lamp_center, lamp_count = c, (lats[len(lats) // 2], lons[len(lons) // 2]), len(lamps)
     night = night or meta["default_departure"] or "21:30"
-    return Story(base, area, by_name[trip[0]], by_name[trip[1]], hhmm_to_min(night), hhmm_to_min(day),
-                 hhmm_to_min(late), lamps_area, lamp_center, lamp_count, meta["helplines"])
+    return Story(base, city, by_name[trip[0]], by_name[trip[1]], hhmm_to_min(night), hhmm_to_min(day),
+                 hhmm_to_min(late), lamps_city, lamp_center, lamp_count, meta["helplines"])
 
 
 def run(demo: Demo, story: Story) -> None:
     page = demo.page
     best, short = story.compare(story.night_min)
 
-    # 1 — default area at night
+    # 1 — default city at night
     page.goto(story.url())
     demo.overlay()
     demo.wait_for_plan(extra=3.5)  # let basemap tiles finish
     demo.caption("<b>SafeHer</b> compares walking routes on street lighting, open places, transit and more", 4.5)
-    demo.caption(f"{story.origin['name']} → {story.dest['name']}, {story.area['city']}, "
+    demo.caption(f"{story.origin['name']} → {story.dest['name']}, {story.city['name']}, "
                  f"at <b>{fmt_clock(story.night_min)}</b>", 3.5)
     demo.move(200, 236)
     if best is not short:
@@ -241,11 +244,11 @@ def run(demo: Demo, story: Story) -> None:
     page.keyboard.press("Escape")
     demo.caption(None, 0.6)
 
-    # 7 — street lamps (in whichever area has them mapped)
-    if story.lamps_area:
-        if story.lamps_area["id"] != story.area["id"]:
-            demo.click(f"#areaSwitch button[data-id='{story.lamps_area['id']}']", pause=0.2)
-        demo.caption(f"In <b>{story.lamps_area['city']}</b>, {story.lamp_count} mapped street lamps glow on the night map", 0)
+    # 7 — street lamps (in whichever city has the most mapped around its default trip)
+    if story.lamps_city:
+        if story.lamps_city["id"] != story.city["id"]:
+            demo.click(f"#citySwitch button[data-id='{story.lamps_city['id']}']", pause=0.2)
+        demo.caption(f"In <b>{story.lamps_city['name']}</b>, {story.lamp_count} mapped street lamps glow on the night map", 0)
         demo.wait_for_plan(extra=3.5)
         lat, lon = story.lamp_center
         page.evaluate(f"map.easeTo({{ center: [{lon}, {lat}], zoom: 15.3, duration: 2500 }})")
@@ -296,7 +299,7 @@ def main() -> None:
         browser = p.chromium.launch(headless=not args.headed,
                                     args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
         ctx = browser.new_context(viewport=SIZE, device_scale_factor=1, record_video_dir=str(tmp),
-                                  record_video_size=SIZE, timezone_id=story.area["timezone"], locale="en-IN")
+                                  record_video_size=SIZE, timezone_id=story.city["timezone"], locale="en-IN")
         page = ctx.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
