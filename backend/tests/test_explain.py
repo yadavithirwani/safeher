@@ -54,8 +54,11 @@ def test_safer_is_allowed(facts):
 
 
 def test_invented_number_rejected(facts):
-    r = ex.check(good_text(facts) + " It has 73 streetlights.", facts, "en")
-    assert any("number not in the data: 73" in p for p in r.problems)
+    # Pick a number that's certainly not in this plan's data (a fixed one can collide when data changes).
+    allowed = ex.allowed_numbers(facts)
+    invented = next(n for n in range(9973, 0, -1) if float(n) not in allowed)
+    r = ex.check(good_text(facts) + f" It has {invented} streetlights.", facts, "en")
+    assert any(f"number not in the data: {invented}" in p for p in r.problems)
 
 
 def test_must_state_both_scores(facts):
