@@ -218,4 +218,23 @@ The Maps HTTP client now uses `truststore` to validate certificates against syst
 
 Reliability is **not established**: repeated pharmacy trials included a clarification-only result despite supplied coordinates. Small-model routing/tool-call omissions still need work; one passing run is not acceptance of every flow. Normal response rendering and conversational limitations above still apply.
 
-Repeat prerequisite and live agent checks with `cd backend && ../.venv/bin/python -m safeher.chatbot.validate --chat`. This calls real Maps APIs and may incur charges. It never counts cached OSM fallback as a Google success. Current full regression result: **205 passed, 1 skipped**.
+Repeat prerequisite and live agent checks with `cd backend && ../.venv/bin/python -m safeher.chatbot.validate --chat`. This calls real Maps APIs and may incur charges. It never counts cached OSM fallback as a Google success. Current full regression result after hybrid-data changes: **215 passed, 1 skipped**.
+
+## 11. Hybrid data tools
+
+`chatbot/local_data.py` provides read-only pilot adapters; no DuckDB or public Nominatim dependency is needed for these snapshot sizes.
+
+| Need | Provider behavior |
+|---|---|
+| Resolve a name | Curated landmarks + OSM POI names/aliases first; case/punctuation normalization, Bangalore/Bengaluru normalization and conservative fuzzy candidates. Google Geocoding only if no local candidate. |
+| Nearby places | Google Places first; cached OSM when Google fails **or returns no matches**. No result does not establish no assistance exists. |
+| Details | Follow the searched record's source. OSM details use cached ID, mapped phone/address/hours; Google IDs are never looked up in OSM. |
+| Walking access | Google walking Routes first; directed local shortest path on failure/empty response, only within one pilot area. |
+
+Local records carry source, attribution and snapshot timestamp separately from retrieval time. Nearby OSM results deduplicate same-name nearby point/building records and exclude explicit restricted-access places. Missing hours remain marked assumed, not verified. Results are not guarantees of access or assistance.
+
+Local walking includes separately reported straight-line endpoint connectors and an 80 m/min speed assumption. Connectors are not verified entrances, crossings or navigation instructions. Disconnected/outside-coverage/ambiguous same-node endpoints return no estimate rather than inventing a straight-line walking time. No support score is attached to these access estimates.
+
+Place coordinates returned by an actual nearby tool can be used for a subsequent walking estimate in the same turn. Unconfirmed geocoding candidates still cannot silently become a confirmed destination. Natural candidate confirmation across turns remains follow-up work.
+
+This strengthens use of existing data, not its geographic coverage or freshness. Direct local search and forced Google-outage walking fallback passed checks against the real snapshots; Google Places still returned live results. A live small-model request to resolve NK Pharmacy did not invoke the resolver successfully, so agent-level name-search reliability remains open even though the tool itself resolves it. Restart the backend after rebuilding snapshots. Google results are not written into OSM datasets or a local analytics database. Additional regression tests: `tests/test_chatbot_local_data.py`.

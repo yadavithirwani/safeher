@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 
 from google.adk.tools import ToolContext
 
-from ..areas import area_for
-from ..routing import load_area
+from .local_data import local_details, local_places, local_search, local_walking
 from .maps import KINDS, MapsClient, MapsUnavailable
 from .models import ChatResponse
 
@@ -34,6 +33,10 @@ def confirmed_point(lat, lon, context):
     location = context.state.get("turn:location", {})
     if location and abs(location["lat"] - lat) < 0.000001 and abs(location["lon"] - lon) < 0.000001:
         return lat, lon
+    for evidence in context.state.get("turn:evidence", []):
+        for place in evidence.get("places", []):
+            if abs(place.get("lat", 1000) - lat) < 0.000001 and abs(place.get("lon", 1000) - lon) < 0.000001:
+                return lat, lon
     text = context.state.get("turn:coordinate_evidence", "")
     numbers = [float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", text)]
     if not all(any(abs(value - number) < 0.000001 for number in numbers) for value in (lat, lon)):
@@ -49,39 +52,21 @@ def retain(context, result):
 
 
 async def resolve_location(query: str, tool_context: ToolContext) -> dict:
-    """Resolve an explicit place name. Present candidates and obtain user confirmation before using them."""
-    from ..api import LANDMARKS  # lazy import avoids app initialization cycle
-    matches = [{"name": name, "lat": lat, "lon": lon, "source": "safeher_landmark"}
-               for rows in LANDMARKS.values() for name, lat, lon in rows
-               if query.strip() and query.casefold() in name.casefold()][:3]
+    """Search local landmarks and OSM POI names/aliases first. Return candidates requiring confirmation; not a worldwide address geocoder."""
+    if not isinstance(query, str) or not 1 <= len(query.strip()) <= 160:
+        return {"error": "Provide a place name of at most 160 characters."}
+    matches = await asyncio.to_thread(local_search, query)
     if matches:
-        return retain(tool_context, {"candidates": matches, "source": "safeher_landmarks"})
+        return retain(tool_context, {"candidates": matches, "source": "local_pilot_search",
+            "warning": "Local name search, not full address geocoding. Confirm the candidate and city."})
     try:
-        return retain(tool_context, await MapsClient().resolve(query))
-    except MapsUnavailable as exc:
-        return {"error": str(exc), "instruction": "Ask for coordinates or a known pilot landmark."}
+        result = await MapsClient().resolve(query)
+    except MapsUnavailable:
+        result = {"candidates": [], "source": "local_pilot_search",
+            "warning": "Google geocoding unavailable and no local match. Cached data covers only two pilot areas.",
+            "error": "location_unresolved"}
+    return retain(tool_context, result)
 
-
-def local_places(kind, lat, lon):
-    area = area_for(lat, lon)
-    if area is None:
-        return []
-    data = load_area(area.id)
-    now = datetime.now(area.tz)
-    results = []
-    for distance, poi in (data.safe_spaces if kind != "toilets" else data.stops).within((lat, lon), 2500):
-        if poi.kind != kind:
-            continue
-        opened, assumed = poi.is_open(now)
-        results.append({"id": poi.osm, "name": poi.name or kind, "kind": kind,
-            "lat": poi.lat, "lon": poi.lon, "distance_m": round(distance),
-            "distance_basis": "straight_line", "source": "openstreetmap",
-            "open_now": opened, "hours_basis": "assumed" if assumed else "mapped_not_verified",
-            "attributions": ["© OpenStreetMap contributors (ODbL)"],
-            "retrieved_at": datetime.now(timezone.utc).isoformat()})
-        if len(results) == 3:
-            break
-    return results
 
 
 async def search_nearby_places(kind: str, lat: float, lon: float, tool_context: ToolContext) -> dict:
@@ -92,20 +77,31 @@ async def search_nearby_places(kind: str, lat: float, lon: float, tool_context: 
         return {"error": "Confirm coordinates or provide a fresh location first."}
     if kind not in KINDS:
         return {"error": "Unsupported category", "allowed": sorted(KINDS)}
+    warning = None
     try:
         result = await MapsClient().nearby(kind, lat, lon)
+        if result.get("places"):
+            return retain(tool_context, result)
+        warning = "Google returned no matching places; checking limited cached pilot data."
     except MapsUnavailable:
-        places = await asyncio.to_thread(local_places, kind, lat, lon)
-        result = {"places": places, "source": "openstreetmap",
-                  "warning": "Google Maps unavailable; using limited cached pilot data."}
+        warning = "Google Maps unavailable; using limited cached pilot data."
+    places = await asyncio.to_thread(local_places, kind, lat, lon)
+    result = {"places": places, "source": "openstreetmap", "warning": warning}
+    if not places:
+        result["warning"] += " No cached matches; this does not mean no assistance exists."
     return retain(tool_context, result)
 
 
 async def get_place_details(place_id: str, tool_context: ToolContext) -> dict:
-    """Get Google details only for a place returned by search in this turn."""
+    """Get provider-specific details only for a place returned by search in this turn."""
     places = [p for e in tool_context.state.get("turn:evidence", []) for p in e.get("places", [])]
-    if not any(p["id"] == place_id and p["source"] == "google_places" for p in places):
+    place = next((p for p in places if p["id"] == place_id), None)
+    if place is None:
         return {"error": "Search for this place first."}
+    if place["source"] == "openstreetmap":
+        return retain(tool_context, await asyncio.to_thread(local_details, place))
+    if place["source"] != "google_places":
+        return {"error": "Unsupported place source."}
     try:
         return retain(tool_context, {"details": await MapsClient().details(place_id), "source": "google_places"})
     except MapsUnavailable as exc:
@@ -118,9 +114,18 @@ async def estimate_walking_access(origin_lat: float, origin_lon: float, destinat
     try:
         origin = confirmed_point(origin_lat, origin_lon, tool_context)
         destination = confirmed_point(destination_lat, destination_lon, tool_context)
-        return retain(tool_context, await MapsClient().walking(origin, destination))
-    except (MapsUnavailable, ValueError):
-        return {"error": "Walking estimate unavailable; do not substitute driving or straight-line time."}
+    except ValueError:
+        return {"error": "Confirm both coordinates before estimating walking access."}
+    try:
+        result = await MapsClient().walking(origin, destination)
+        if result.get("routes"):
+            return retain(tool_context, result)
+    except MapsUnavailable:
+        pass
+    result = await asyncio.to_thread(local_walking, origin, destination)
+    result["warning"] = "Google walking estimate unavailable. " + result.get(
+        "warning", "No usable cached walking connection; do not substitute driving or straight-line time.")
+    return retain(tool_context, result)
 
 
 async def plan_supported_trip(origin_lat: float, origin_lon: float, destination_lat: float,
@@ -183,8 +188,17 @@ def render_evidence(evidence: list[dict]) -> ChatResponse:
                 str(c.get("name") or c.get("address")) for c in candidates)
             response.needs_clarification = True
             response.places = candidates
+        if "candidates" in item and not item["candidates"]:
+            response.reply = "I couldn't resolve that place. Provide a more specific landmark, city, or explicit coordinates."
+            response.needs_clarification = True
+        if "details" in item:
+            details = item["details"]
+            for place in response.places:
+                if place.get("id") == details.get("id"):
+                    place.update(details=details)
         if "places" in item:
             response.places = item["places"]
+            response.needs_clarification = False
             if response.places:
                 response.reply = "Nearby results (straight-line distance, not walking distance): " + "; ".join(
                     f"{p['name']} — {p['distance_m']} m; hours: {p['hours_basis']}"
@@ -202,5 +216,6 @@ def render_evidence(evidence: list[dict]) -> ChatResponse:
                 response.warnings.extend(item.get("warnings", []))
                 response.warnings.append(item["disclaimer"])
             else:
-                response.reply = "Google walking estimates are available below; these routes have no SafeHer score."
+                response.reply = ("Walking estimates are available below; these routes have no SafeHer score."
+                                  if response.routes else "No walking estimate is available for these locations.")
     return response
