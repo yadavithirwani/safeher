@@ -204,7 +204,13 @@ def meta():
         "google": {f: g_on(f) for f in GOOGLE["features"]},
         "google_autocomplete_min_chars": GOOGLE["autocomplete_min_chars"],
         "max_trip_km": APP["trips"]["max_trip_km"],
+        "assistant": _assistant(),
     }
+
+
+def _assistant() -> dict:
+    from .chatbot.agents import describe
+    return describe()
 
 
 @app.get("/api/search")
@@ -288,13 +294,19 @@ def _google_routes(o: LatLon, d: LatLon) -> tuple[list[dict], str | None]:
 _place_names: dict[str, set[str]] = {}
 
 
-def _city_place_names(city_id: str) -> set[str]:
-    """Every named place in the city: an explanation may only name the ones in its own facts."""
-    if city_id not in _place_names:
-        names = {(p["tags"].get("name:en") or p["tags"].get("name")) for p in store.places(city_id)}
-        names |= {lm.name for lm in CITIES[city_id].landmarks}
-        _place_names[city_id] = {n for n in names if n}
-    return _place_names[city_id]
+def _corridor_place_names(o: LatLon, d: LatLon) -> set[str]:
+    """Named places along this trip's corridor (the ones a model could plausibly bring up): an
+    explanation may only name those in its own facts. Not the whole city: with ~30,000 names, ordinary
+    words ("Options") collide with some shop's name far away."""
+    area = corridor(o, d)
+    if area.id not in _place_names:
+        names = {(p["tags"].get("name:en") or p["tags"].get("name")) for p in store.places(area.city)
+                 if area.contains(p["lat"], p["lon"])}
+        names |= {lm.name for lm in CITIES[area.city].landmarks if area.contains(lm.lat, lm.lon)}
+        if len(_place_names) > 64:
+            _place_names.clear()
+        _place_names[area.id] = {n for n in names if n}
+    return _place_names[area.id]
 
 
 @app.post("/api/explain")
@@ -311,7 +323,7 @@ def explain_trip(req: ExplainRequest):
     at_endpoints = {lm.name for lm in CITIES[city].landmarks
                     if min(haversine_m((lm.lat, lm.lon), o), haversine_m((lm.lat, lm.lon), d)) < ENDPOINT_LANDMARK_M}
     try:
-        result = explain(p, req.lang, forbidden_names=_city_place_names(city) - at_endpoints)
+        result = explain(p, req.lang, forbidden_names=_corridor_place_names(o, d) - at_endpoints)
     except ExplainFailed as e:
         raise HTTPException(502, str(e)) from e
     return {k: result[k] for k in ("text", "provider", "model", "lang", "checked")}

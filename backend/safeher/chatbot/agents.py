@@ -27,6 +27,15 @@ If the user's intent changes, transfer to the supervisor or the relevant peer.
 """
 
 
+def describe() -> dict:
+    """Which model answers HerSide, for the UI badge (no side effects)."""
+    choice = os.getenv("CHATBOT_PROVIDER") or ("gemini" if os.getenv("GOOGLE_CLOUD_PROJECT") else "ollama")
+    if choice == "gemini":
+        return {"provider": "gemini", "model": os.getenv("CHATBOT_MODEL", "gemini-2.5-flash"),
+                "platform": "Vertex AI" if os.getenv("GOOGLE_CLOUD_PROJECT") else "Gemini API"}
+    return {"provider": "ollama", "model": os.getenv("CHATBOT_MODEL", "llama3.2:3b"), "platform": "on this computer"}
+
+
 def model():
     # Default: Gemini on Vertex AI when a Cloud project is configured (ADC), else local Ollama.
     choice = os.getenv("CHATBOT_PROVIDER") or ("gemini" if os.getenv("GOOGLE_CLOUD_PROJECT") else "ollama")

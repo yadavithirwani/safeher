@@ -229,3 +229,21 @@ def test_herside_uses_gemini_on_vertex_when_a_cloud_project_is_set(monkeypatch):
     assert os.environ["GOOGLE_GENAI_USE_VERTEXAI"] == "TRUE" and os.environ["GOOGLE_CLOUD_LOCATION"] == "global"
     os.environ["GOOGLE_CLOUD_PROJECT"] = ""
     assert not isinstance(agents.model(), str)  # no Cloud project: local Ollama, as before
+
+
+def test_one_word_shop_names_dont_flag_ordinary_words(facts):
+    """Found with real Gemini answers: a shop called "Options" (and "Care", "Garage") rejected plain
+    English. A one-word place only counts when written as a name mid-sentence."""
+    shops = {"Options", "Care", "Garage"}
+    for extra in (" Options: both routes are lit in parts.", " Take care on the darker stretch.",
+                  " Garage entrances line part of the way."):
+        assert ex.check(good_text(facts) + extra, facts, "en", forbidden_names=shops).ok, extra
+    r = ex.check(good_text(facts) + " It passes the Garage on the main road.", facts, "en", forbidden_names=shops)
+    assert not r.ok and any("Garage" in p for p in r.problems)
+
+
+def test_explain_checks_only_places_along_the_trip():
+    """The corridor's places are checked, not all ~30,000 in the city."""
+    from safeher import api
+    names = api._corridor_place_names((28.5433, 77.2067), (28.5286, 77.2195))
+    assert 200 < len(names) < 5000 and "Options" not in names

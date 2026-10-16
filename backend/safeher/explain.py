@@ -154,12 +154,21 @@ def check(text: str, facts: dict, lang: str, forbidden_names: set[str] = frozens
         (s["name"] or "").lower() for r in facts["routes"] for s in r["stops"]}
     # Blank out places that ARE in the facts first, so "Indiranagar Traffic Police Station" (allowed)
     # doesn't trip the separate place called "Indiranagar"; then match whole words only.
-    lowered = text.lower()
+    blanked = text
     for k in sorted((k for k in known if k), key=len, reverse=True):
-        lowered = lowered.replace(k, " ")
+        blanked = re.sub(re.escape(k), " ", blanked, flags=re.IGNORECASE)
+    lowered = blanked.lower()
     for name in forbidden_names:
         n = name.lower()
-        if len(n) > 4 and n not in known and re.search(rf"(?<!\w){re.escape(n)}(?!\w)", lowered):
+        if len(n) <= 4 or n in known:
+            continue
+        if " " in n:
+            hit = re.search(rf"(?<!\w){re.escape(n)}(?!\w)", lowered)
+        else:
+            # A one-word place ("Options", "Care", "Garage") only counts when written as a name:
+            # capitalised, and not just the first word of a sentence or line.
+            hit = re.search(rf"(?<![.!?:\n]\s)(?<![.!?:\n])(?<=\s|\(|,|\"){re.escape(name)}(?!\w)", blanked)
+        if hit:
             problems.append(f"mentions a place not in the route data: '{name}'")
     if lang == "hi" and not re.search(DEVANAGARI, text):
         problems.append("not written in Hindi")
