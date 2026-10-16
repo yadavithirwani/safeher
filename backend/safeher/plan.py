@@ -13,7 +13,8 @@ from .cities import CITIES, City, corridor
 from .geo import LatLon, haversine_m, interpolate, polyline_distance_m, split_polyline
 from .pois import Poi, PointIndex
 from .routing import AreaData, Edge, candidate_paths, edge_between, path_edges
-from .scoring import WEIGHTS_VERSION, SegmentScore, band, night_fraction, score_route, score_segment, weights_at
+from .scoring import (MEAN_SHARE, WORST_PERCENTILE, WORST_SHARE, WEIGHTS_VERSION, RouteScore, SegmentScore, band,
+                      night_fraction, score_route, score_segment, weights_at)
 
 _C = config.scoring()
 _R, _REASONS, _LIGHT = _C["routing"], _C["reasons"], _C["lighting"]
@@ -305,6 +306,105 @@ def _same_as(points: list[LatLon], line: list[LatLon]) -> float:
     return near / total if total else 0.0
 
 
+_LIGHT_SOURCES = (("tagged lit=", "Mapped as lit in OpenStreetMap"), ("tagged unlit", "Mapped as unlit in OpenStreetMap"),
+                  ("street lamps mapped", "Street lamps mapped within 25 m"), ("satellite", "NASA satellite night lights"),
+                  ("estimated from road type", "Estimated from the type of road"))
+
+
+def _source(signal: str, r: sig.Reading) -> str:
+    """Group a reading's note into the kind of evidence it came from (for 'how was this calculated')."""
+    if r.confidence <= 0:
+        return "No data"
+    if signal == sig.LIGHTING:
+        return next((label for key, label in _LIGHT_SOURCES if key in r.note), r.note)
+    if signal == sig.TRANSIT:
+        return "No stop open within reach" if "no stop" in r.note else "Bus, metro or rail stop open nearby"
+    if signal == sig.SAFE_SPACES:
+        return "Places open nearby" if not r.note.startswith("0 ") else "No place open within 150 m"
+    if signal == sig.INCIDENTS:
+        return r.note.split(" (")[0] if "police district" in r.note else r.note
+    if signal == sig.REPORTS:
+        return "Community reports nearby" if r.value < 100 else "No recent reports nearby"
+    return r.note
+
+
+_STOP_KIND = {"bus_stop": "bus stop", "metro": "metro station", "rail": "railway station"}
+
+
+def route_evidence(ctx: TripContext, pieces: list[PieceInfo], rs: RouteScore) -> dict:
+    """Exactly what this route's score was computed from: the formula with its numbers, each signal's
+    share of the score, where each signal's data came from, and the places, stops, lamps, districts
+    and reports that were used."""
+    total = sum(p.length_m for p in pieces) or 1.0
+    scored = [p for p in pieces if p.segment.score is not None]
+    scored_len = sum(p.length_m for p in scored) or 1.0
+    lamps: set[str] = set()
+    stops: dict[str, tuple[float, Poi]] = {}
+    places: dict[str, Poi] = {}
+    reports: list[sig.Report] = []
+    seen_reports: set[int] = set()
+    local = ctx.local
+    for p in pieces:
+        mid = interpolate(p.points[0], p.points[-1], 0.5)
+        lamps.update(lamp.osm for _, lamp in ctx.data.lamps.within(mid, sig.LAMP_RADIUS_M))
+        for d, stop in ctx.data.transit.within(mid, sig.TRANSIT_SEARCH_M):
+            if stop.is_open(local)[0]:
+                if stop.osm not in stops or d < stops[stop.osm][0]:
+                    stops[stop.osm] = (d, stop)
+                break
+        places.update((poi.osm, poi) for poi in p.open_places)
+        for _, rep in ctx.reports.within(mid, sig.REPORT_RADIUS_M):
+            if id(rep) not in seen_reports:
+                seen_reports.add(id(rep)); reports.append(rep)
+
+    signals = {}
+    for k in sig.SIGNALS:
+        sources = Counter()
+        for p in pieces:
+            sources[_source(k, p.segment.readings[k])] += p.length_m
+        signals[k] = {
+            "label": SIGNAL_LABELS[k],
+            "value": None if rs.signal_means[k] is None else round(rs.signal_means[k]),
+            "confidence": round(rs.signal_confidence[k], 2),
+            "weight_now": round(ctx.weights[k], 3),
+            # After confidence redistribution: the share of the average this signal actually carried.
+            "effective_weight": round(sum(p.length_m * p.segment.effective_weights[k] for p in scored) / scored_len, 3),
+            # Points of the stretch average contributed by this signal; the five add up to the average.
+            "points": round(sum(p.length_m * p.segment.effective_weights[k] * p.segment.readings[k].value
+                                for p in scored) / scored_len, 1),
+            "sources": [{"what": what, "share": round(length / total, 3)} for what, length in sources.most_common()],
+        }
+    signals[sig.LIGHTING]["used"] = {"street_lamps": len(lamps)}
+    signals[sig.TRANSIT]["used"] = [
+        {"name": stop.name or "Unnamed " + _STOP_KIND.get(stop.kind, "stop"), "kind": _STOP_KIND.get(stop.kind, stop.kind),
+         "closest_m": round(d)}
+        for d, stop in sorted(stops.values(), key=lambda x: x[0])[:8]]
+    kinds = Counter(poi.kind for poi in places.values())
+    signals[sig.SAFE_SPACES]["used"] = {
+        "by_kind": {KIND_LABELS.get(kd, kd): n for kd, n in kinds.most_common()},
+        "examples": [{"name": poi.name, "kind": KIND_LABELS.get(poi.kind, poi.kind),
+                      "hours": "typical hours assumed" if poi.is_open(local)[1] else "mapped hours"}
+                     for poi in sorted(places.values(), key=lambda q: (q.kind not in ("police", "hospital"), q.name or "~"))
+                     if poi.name][:8],
+    }
+    signals[sig.INCIDENTS]["used"] = sorted({p.segment.readings[sig.INCIDENTS].note for p in pieces
+                                             if p.segment.readings[sig.INCIDENTS].confidence > 0})
+    signals[sig.REPORTS]["used"] = dict(Counter(r.category for r in reports))
+    return {
+        "stretches": len(pieces),
+        "stretch_m": SEGMENT_M,
+        "night_fraction": round(ctx.night, 2),
+        "coverage": round(rs.coverage, 3),
+        "average": None if rs.mean is None else round(rs.mean, 1),
+        "weakest": None if rs.worst_stretch is None else round(rs.worst_stretch, 1),
+        "weakest_percentile": WORST_PERCENTILE,
+        "mean_share": MEAN_SHARE,
+        "worst_share": WORST_SHARE,
+        "score": None if rs.score is None else round(rs.score, 1),
+        "signals": signals,
+    }
+
+
 def _route_payload(ctx: TripContext, label: str, pieces: list[PieceInfo], line: list[LatLon],
                    plan_b: dict | None, source: str) -> dict:
     rs = score_route([(p.length_m, p.segment) for p in pieces], ctx.weights)
@@ -326,6 +426,7 @@ def _route_payload(ctx: TripContext, label: str, pieces: list[PieceInfo], line: 
         ],
         "highlights": highlights,
         "reasons": reasons,
+        "evidence": route_evidence(ctx, pieces, rs),
         "weak_stretches": weak_stretches(pieces),
         "stops": stops_along(ctx.data, line, ctx.local),
         "geometry": [[round(a, 6), round(b, 6)] for a, b in line],

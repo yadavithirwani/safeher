@@ -427,7 +427,7 @@ Typical planning input:
 `/api/plan` output contains:
 
 - Top level: `area` (the trip corridor: `id`, `city`, `name`), `departure_local`, `night_fraction`, `weights_version`, `routes`, `data_notes`, `disclaimer`, `attribution`.
-- Each route: `label`, `distance_m`, `duration_min`, nullable `score`, `band`, scored `coverage`, signal `breakdown`, `highlights`, `reasons`, `weak_stretches`, `stops`, `geometry`, `pieces`, `plan_b`.
+- Each route: `label`, `distance_m`, `duration_min`, nullable `score`, `band`, scored `coverage`, signal `breakdown`, `highlights`, `reasons`, `weak_stretches`, `stops`, `geometry`, `pieces`, `plan_b`, `evidence` (the score's own formula numbers, per-signal points, effective weights, data sources by share of length, and the lamps, stops, places, districts and reports used; shown by "How is this calculated?").
 - `coverage` is scoreable-length coverage; `plan_b.within_threshold_share` is help-access coverage. They are different metrics.
 
 Typical initial chat input (no previous session; without a location this should ask for clarification):
