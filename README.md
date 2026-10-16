@@ -10,9 +10,9 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 
 **[Read the end-to-end pipeline, inputs, outputs and feature status](docs/CURRENT_PIPELINE.md)** — the source of truth for what is implemented today, including the exact AI boundary, datasets, scoring, Plan B Coverage, live sharing, API contracts and limitations. [The design spec](docs/DESIGN_SPEC.md) also includes planned features; it is not an implementation checklist.
 
-## Companion chatbot backend
+## HerSide · chat companion
 
-Initial Google ADK supervisor/specialist agents and `POST /api/chat` are implemented, with Ollama configuration, Google Maps tools and a model-independent SOS response. **Live Ollama/ADK/Places smoke checks have passed; model reliability and Geocoding configuration still need work.** Setup, tests and limitations: [backend/CHATBOT_README.md](backend/CHATBOT_README.md). Frontend integration comes later.
+Initial Google ADK supervisor/specialist agents and `POST /api/chat` are implemented, with Ollama configuration, Google Maps tools and a model-independent SOS response. **Live Ollama/ADK/Places smoke checks have passed; model reliability and Geocoding configuration still need work.** Setup, tests and limitations: [backend/CHATBOT_README.md](backend/CHATBOT_README.md). Open **HerSide · Ask for help** above the route cards for nearby-place questions, selected-trip comparisons, one-shot location attachment and SOS call options. Chat context stays in memory, not browser storage; clearing the UI does not immediately delete the expiring server context. Frontend integration is an initial version, not a production emergency service.
 
 ## Demo
 

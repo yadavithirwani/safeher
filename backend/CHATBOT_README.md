@@ -1,6 +1,6 @@
 # SafeHer Companion — backend architecture draft
 
-**Status: initial backend implemented; live Ollama/ADK/Places and routing smoke checks passed, with reliability and Geocoding issues remaining.** Frontend integration comes later. Working name: **SafeHer Companion**, with an SOS mode. This assistant helps find evidence-backed options; it is not an emergency dispatcher or a guarantee of safety.
+**Status: initial backend and HerSide frontend implemented; live Ollama/ADK/Places and routing smoke checks passed, with reliability and Geocoding issues remaining.** Working name: **SafeHer Companion**, with an SOS mode. This assistant helps find evidence-backed options; it is not an emergency dispatcher or a guarantee of safety.
 
 Existing application: [current pipeline](../docs/CURRENT_PIPELINE.md).
 
@@ -151,7 +151,7 @@ Acceptance scenarios: pre-trip route comparison; ambiguous “home”; pharmacy 
 - Name: **SafeHer Companion** (SOS is a mode).
 - India, walking, existing pilot-area scoring, English/Hindi first.
 - Ollama initially; Gemini later; Maps credentials independent and optional for local tests.
-- Initial backend implemented; no frontend changes. See operational notes below.
+- Initial backend and HerSide frontend implemented. See operational notes below.
 
 Official references checked for this draft:
 - [ADK Ollama](https://adk.dev/agents/models/ollama/)
@@ -200,7 +200,7 @@ Each turn starts at the supervisor in a short-lived ADK session with bounded rec
 
 - Structured replies come from tool evidence; unchecked model prose is not returned. The model selects tools and clarifications. Normal templates are English; Hindi emergency text exists, but Hindi conversation quality is not validated.
 - Place-name resolution returns candidates and asks confirmation. Pre-trip tools initially require explicit coordinates and an ISO departure timestamp in recent dialogue. Convenient candidate confirmation and natural-language time normalization remain follow-up work.
-- No private live-trip references, automatic calls, dispatch, sharing, or frontend changes.
+- No private live-trip references, automatic calls, dispatch or sharing. Initial frontend is described in section 12.
 - SOS returns immediately without searching Maps in that turn. A subsequent nonurgent request can search for assistance; automatic emergency enrichment is not implemented.
 - Place details and walking estimates are tool evidence; richer merged detail replies/directions actions are follow-up work. Current nearby actions are `show_place`; SOS offers `call` and `request_location`.
 - Google opening evidence describes current listings, not arbitrary future arrival-time availability.
@@ -238,3 +238,20 @@ Local walking includes separately reported straight-line endpoint connectors and
 Place coordinates returned by an actual nearby tool can be used for a subsequent walking estimate in the same turn. Unconfirmed geocoding candidates still cannot silently become a confirmed destination. Natural candidate confirmation across turns remains follow-up work.
 
 This strengthens use of existing data, not its geographic coverage or freshness. Direct local search and forced Google-outage walking fallback passed checks against the real snapshots; Google Places still returned live results. A live small-model request to resolve NK Pharmacy did not invoke the resolver successfully, so agent-level name-search reliability remains open even though the tool itself resolves it. Restart the backend after rebuilding snapshots. Google results are not written into OSM datasets or a local analytics database. Additional regression tests: `tests/test_chatbot_local_data.py`.
+
+## 12. HerSide frontend (initial integration)
+
+The user-facing name is **HerSide**. Open “HerSide · Ask for help” above the route cards. `app/web/chatbot.js` and `chatbot.css` keep this UI separate from routing/sharing code.
+
+Features: native modal dialog with keyboard focus handling, suggested questions, review-before-send selected-trip coordinates/time, source/hour/distance labels, Google Maps links, persistent India 112 link, explicit SOS request, and one-shot GPS attachment. GPS is acquired only on click, sent only on submission, and cleared after sending or closing. No tracking starts automatically. No chat/token browser storage; clear chat resets local context while server records expire independently.
+
+Backend limitations above still apply. English-first UI, no streamed responses, no automatic navigation/calls, and no claim of verified safe places. Google results are linked to Google Maps rather than plotted on the OSM basemap. Model/tool quality is not fixed by adding the panel.
+
+Browser tests run separately from geospatial/API tests to avoid a native macOS subprocess crash observed when starting Playwright after the full mixed suite:
+
+```bash
+cd backend
+RUN_BROWSER_TESTS=1 PLAYWRIGHT_CHANNEL=chrome ../.venv/bin/python -m pytest tests/test_chatbot_ui.py -q
+```
+
+Use installed Chrome as above, or install Playwright Chromium and omit `PLAYWRIGHT_CHANNEL`. Six isolated tests cover keyboard/Escape/modal focus, mobile horizontal overflow, safe text rendering, sources/actions, expired sessions, and explicit one-shot GPS. They mock chat responses; they are not model-quality tests.
