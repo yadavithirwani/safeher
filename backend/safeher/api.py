@@ -7,6 +7,8 @@ import logging
 from contextlib import asynccontextmanager, suppress
 import copy
 import json
+import logging
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -224,9 +226,10 @@ def search(q: str = Query(min_length=1, max_length=80), area: str | None = None,
     if area and g_on("autocomplete") and len(q.strip()) >= GOOGLE["autocomplete_min_chars"]:
         a = AREAS[area]
         try:
-            preds = google.client().autocomplete(q.strip(), (a.south, a.west, a.north, a.east), session)
-        except google.GoogleError:
-            preds = []  # local results still work
+            preds = google.client().autocomplete(q.strip(), (a.south, a.west, a.north, a.east), _session(session))
+        except google.GoogleError as e:
+            logging.warning("Google autocomplete failed, showing local results only: %s", e)
+            preds = []
         local_names = {r["name"].lower() for r in results}
         for pr in preds:
             if pr["main"].lower() in local_names:
@@ -376,6 +379,14 @@ def _google_nearby(lat, lon, kind, local, limit, data):
     return {"kind": kind, "at": local.isoformat(timespec="minutes"), "source": "google", "results": out[:limit]}
 
 
+_SESSION_TOKEN = re.compile(r"^[A-Za-z0-9_-]{1,36}$")
+
+
+def _session(token: str | None) -> str | None:
+    """Google requires URL-safe base64 session tokens (≤36 chars); drop anything else rather than fail."""
+    return token if token and _SESSION_TOKEN.match(token) else None
+
+
 def _need(feature: str) -> None:
     if not g_on(feature):
         raise HTTPException(404, f"Google {feature.replace('_', ' ')} is not enabled")
@@ -414,7 +425,7 @@ def google_place(place_id: str = PathParam(pattern=r"^[A-Za-z0-9_-]{10,300}$"),
                  session: str | None = Query(default=None, max_length=64)):
     _need("autocomplete")
     try:
-        p = google.client().place(place_id, session)
+        p = google.client().place(place_id, _session(session))
     except google.GoogleError as e:
         if e.status in (400, 404):  # malformed or unknown place ID: the client's mistake, not ours
             raise HTTPException(404, "Place not found.") from e

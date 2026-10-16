@@ -318,3 +318,13 @@ def test_invalid_place_id_is_404_not_502(google_on):
             return super().__call__(request)
     c = google_on(BadId())
     assert c.get("/api/google/place/0000000000").status_code == 404
+
+
+def test_unsafe_session_token_is_dropped_not_sent(google_on):
+    """Found with the live API: Google rejects session tokens that aren't URL-safe base64."""
+    fake = FakeGoogle()
+    c = google_on(fake)
+    r = c.get("/api/search", params={"q": "toit", "area": DEL.id, "session": "has spaces!"}).json()
+    assert any(x.get("source") == "google" for x in r)
+    body = json.loads(next(q for q in fake.requests if "autocomplete" in str(q.url)).content)
+    assert "sessionToken" not in body

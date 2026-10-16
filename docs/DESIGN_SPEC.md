@@ -477,3 +477,5 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 16 Oct 2026 | "Most support" = best full route score among all support settings (λ 6, 3, 1.5, 0.75); config v2026-10-16.1 | Real Google comparison exposed a better route the old search missed |
 | 16 Oct 2026 | Compare only Google's recommended route (`google.max_routes = 1`); keep Google places whose primary type was requested | Six route cards were noise; type filter removes obvious mismatches |
 | 16 Oct 2026 | Tests never call real Google by default | No cost, no network dependence, reproducible results |
+| 16 Oct 2026 | Search ignores apostrophes; Google session tokens validated (URL-safe base64 ≤ 36) and Google errors logged, never silently dropped | Real query "bobs bar" returned nothing: apostrophe mismatch locally and a rejected token hidden by a silent fallback |
+| 16 Oct 2026 | OpenStreetMap stays as the street network and scoring data; Google adds search, live hours, basemap and route comparison | Google provides no lighting, lamps or walkable street graph, and its terms forbid storing its data to build our own scores |

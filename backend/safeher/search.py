@@ -40,7 +40,8 @@ class Entry:
 
 def _norm(text: str) -> str:
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode() or text
-    return re.sub(r"[^\w\s]", " ", text.lower()).strip()
+    text = re.sub(r"['’`]", "", text.lower())  # "Bob's" → "bobs", so a query without the apostrophe matches
+    return re.sub(r"[^\w\s]", " ", text).strip()
 
 
 def _label(tags: dict) -> str:

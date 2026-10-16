@@ -64,3 +64,9 @@ def test_results_are_inside_their_area(client):
 ])
 def test_match_rank(query, name, rank):
     assert _match_rank(query, name) == rank
+
+
+def test_apostrophes_are_ignored():
+    """Found with real data: "bobs bar" didn't match "Bob's Bar"."""
+    assert _match_rank("bobs bar", "Bob's Bar") == 0
+    assert _match_rank("bob's", "Bobs Cafe") == 1
