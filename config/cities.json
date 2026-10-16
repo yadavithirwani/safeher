@@ -1,0 +1,21 @@
+{
+  "_comment": "Whole cities pre-loaded from Geofabrik extracts (python -m safeher.citydata build). Trips inside a city's bbox cut their corridor from the local city database instead of downloading from Overpass.",
+  "source_dir": "data/raw/osm",
+  "output_dir": "data/cities",
+  "cities": [
+    {
+      "id": "delhi",
+      "name": "Delhi",
+      "extract": "northern-zone-latest.osm.pbf",
+      "bbox": { "south": 28.40, "west": 76.83, "north": 28.89, "east": 77.35 },
+      "timezone": "Asia/Kolkata"
+    },
+    {
+      "id": "bengaluru",
+      "name": "Bengaluru",
+      "extract": "southern-zone-latest.osm.pbf",
+      "bbox": { "south": 12.83, "west": 77.45, "north": 13.15, "east": 77.78 },
+      "timezone": "Asia/Kolkata"
+    }
+  ]
+}

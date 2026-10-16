@@ -48,3 +48,6 @@ backend/.hypothesis/
 
 # Trip areas downloaded on demand (local cache)
 data/areas/trip-*/
+
+# City databases built from the raw extracts (python -m safeher.citydata build)
+data/cities/

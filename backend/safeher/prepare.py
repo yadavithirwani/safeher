@@ -12,8 +12,10 @@ import fcntl
 import hashlib
 import json
 import math
+import os
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import networkx as nx
@@ -30,6 +32,15 @@ RETRY_S = float(_A["retry_failed_after_s"])
 
 _pool = ThreadPoolExecutor(max_workers=int(_A["download_workers"]), thread_name_prefix="area-download")
 _lock = threading.Lock()
+_futures: list = []
+
+
+def wait_idle(timeout: float = 60) -> None:
+    """Block until queued downloads finish (used by tests between cases, and on shutdown)."""
+    from concurrent.futures import wait
+    pending = [f for f in _futures if not f.done()]
+    wait(pending, timeout=timeout)
+    _futures[:] = [f for f in _futures if not f.done()]
 
 
 class TooFar(ValueError):
@@ -61,7 +72,9 @@ def _status_path(a: Area):
 
 def _write_status(a: Area, state: str, message: str, **extra) -> None:
     a.dir.mkdir(parents=True, exist_ok=True)
-    tmp = _status_path(a).with_suffix(".tmp")
+    # A unique temp name per writer: several threads/workers update the same status file, and a shared
+    # temp file could be renamed away under another writer (seen as spurious "download failed").
+    tmp = _status_path(a).with_name(f"status.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex[:8]}.tmp")
     tmp.write_text(json.dumps({"area": a.id, "state": state, "message": message, "updated": time.time(), **extra}))
     tmp.replace(_status_path(a))
 
@@ -109,10 +122,16 @@ def _download(a: Area) -> None:
         if is_ready(a):
             return
         started = time.time()
-        _write_status(a, "downloading", "Downloading street data from OpenStreetMap (first time only)…",
-                      started=started)
+        from . import citydata
+        city = citydata.city_for_bbox(a.south, a.west, a.north, a.east)
         try:
-            meta = save_area(a, write_meta=False)
+            if city:  # whole city pre-loaded: cut the corridor locally in about a second
+                _write_status(a, "downloading", f"Preparing {city['name']} street data…", started=started)
+                meta = citydata.build_corridor(city, a)
+            else:
+                _write_status(a, "downloading", "Downloading street data from OpenStreetMap (first time only)…",
+                              started=started)
+                meta = save_area(a, write_meta=False)
             _write_status(a, "checking", "Checking the street data…", started=started)
             problem = _check(a)
             if problem:
@@ -146,6 +165,6 @@ def ensure(o: LatLon, d: LatLon, name: str | None = None) -> tuple[Area | None, 
         if st["state"] in ("unknown", "queued") or retry_failed or (
                 st["state"] in ("downloading", "checking") and time.time() - st["updated"] > STALE_S):
             _write_status(a, "queued", "Waiting to download street data.")
-            _pool.submit(_download, a)
+            _futures.append(_pool.submit(_download, a))
             st = status(a.id)
     return None, st

@@ -18,6 +18,8 @@ from tests.test_google import FakeGoogle
 DEL = areas.AREAS["del-hauz-khas-saket"]
 HAUZ_KHAS, SAKET = (28.5433, 77.2067), (28.5286, 77.2195)
 ORIGINAL_DOWNLOAD = prepare._download  # captured at import, before conftest stubs it per test
+from safeher import citydata as _citydata  # noqa: E402
+REAL_CITY_FOR_BBOX = _citydata.city_for_bbox
 pytestmark = pytest.mark.skipif(not (DEL.dir / "walk.graphml").exists(), reason="OSM snapshots not fetched")
 
 
@@ -39,9 +41,12 @@ def anywhere(monkeypatch):
     monkeypatch.setattr(areas, "AREAS", {})
     monkeypatch.setattr(osm, "save_area", fake_save_area)
     monkeypatch.setattr(prepare, "_download", ORIGINAL_DOWNLOAD)  # real download logic, fake data source
+    from safeher import citydata
+    monkeypatch.setattr(citydata, "city_for_bbox", lambda *a: None)  # exercise the Overpass path by default
     load_area.cache_clear()
     api._plan_cache.clear()
     yield TestClient(api.app)
+    prepare.wait_idle()  # don't let a background download spill into the next test's folder
     load_area.cache_clear()
 
 
@@ -155,3 +160,38 @@ def test_preview_shows_googles_route_while_preparing(anywhere, monkeypatch):
     preview = r.json()["preview"]
     assert len(preview) == 1 and preview[0]["label"] == "Google route" and preview[0]["duration_min"] > 0
     assert preview[0]["geometry"][0] == [HAUZ_KHAS[0], HAUZ_KHAS[1]]
+
+
+def test_corridor_inside_a_built_city_comes_from_the_local_database(anywhere, monkeypatch):
+    """No network: Delhi trips are cut from data/cities/delhi.duckdb when it exists."""
+    from safeher import citydata, osm
+    if not citydata.db_path("delhi").exists():
+        pytest.skip("Delhi city database not built (python -m safeher.citydata build delhi)")
+    monkeypatch.setattr(citydata, "city_for_bbox", REAL_CITY_FOR_BBOX)
+    def must_not_download(*a, **k):
+        raise AssertionError("downloaded from Overpass although the city database covers this trip")
+    monkeypatch.setattr(osm, "save_area", must_not_download)
+    job = anywhere.post("/api/plan", json=body()).json()["job"]
+    st = wait_ready(anywhere, job["area"])
+    assert st["state"] == "ready", st["message"]
+    p = anywhere.post("/api/plan", json=body()).json()
+    assert [r["distance_m"] for r in sorted(p["routes"], key=lambda r: r["distance_m"])][0] == 2838  # same streets as before
+
+
+def test_status_writes_are_safe_under_concurrency(tmp_path):
+    """Found by testing: a shared temp file made concurrent status updates fail."""
+    a = prepare.trip_area(HAUZ_KHAS, SAKET, "race")
+    errors = []
+
+    def writer(i):
+        try:
+            for _ in range(50):
+                prepare._write_status(a, "downloading", f"writer {i}")
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(8)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert not errors
+    assert json.loads((a.dir / "status.json").read_text())["state"] == "downloading"
+    assert not list(a.dir.glob("*.tmp"))

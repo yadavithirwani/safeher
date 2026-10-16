@@ -160,3 +160,15 @@ def test_prompt_contains_only_facts_json(facts):
     system, user = ex.build_prompt(facts, "hi")
     assert "Hindi" in system and "safe" in system  # the rule itself names the forbidden words
     assert user.startswith("Facts (JSON):") and '"routes"' in user
+
+
+def test_known_place_containing_a_forbidden_name_is_allowed(facts):
+    """Found with real Gemini: naming 'Indiranagar Traffic Police Station' (in the facts) was rejected because
+    a different place is called 'Indiranagar'."""
+    stop = next(s["name"] for r in facts["routes"] for s in r["stops"] if s["name"])
+    first_word = stop.split()[0]
+    text = good_text(facts) + f" It passes {stop}."
+    assert ex.check(text, facts, "en", forbidden_names={first_word}).ok
+    # …but the forbidden place on its own is still caught, and only as a whole word.
+    assert not ex.check(good_text(facts) + f" It goes via {first_word}.", facts, "en", forbidden_names={first_word}).ok
+    assert ex.check(good_text(facts) + " It is nice.", facts, "en", forbidden_names={"nic"}).ok

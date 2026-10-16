@@ -149,9 +149,14 @@ def check(text: str, facts: dict, lang: str, forbidden_names: set[str] = frozens
             problems.append(f"number not in the data: {n:g}")
     known = {r["label"].lower() for r in facts["routes"]} | {
         (s["name"] or "").lower() for r in facts["routes"] for s in r["stops"]}
+    # Blank out places that ARE in the facts first, so "Indiranagar Traffic Police Station" (allowed)
+    # doesn't trip the separate place called "Indiranagar"; then match whole words only.
     lowered = text.lower()
+    for k in sorted((k for k in known if k), key=len, reverse=True):
+        lowered = lowered.replace(k, " ")
     for name in forbidden_names:
-        if len(name) > 4 and name.lower() in lowered and name.lower() not in known:
+        n = name.lower()
+        if len(n) > 4 and n not in known and re.search(rf"(?<!\w){re.escape(n)}(?!\w)", lowered):
             problems.append(f"mentions a place not in the route data: '{name}'")
     if lang == "hi" and not re.search(DEVANAGARI, text):
         problems.append("not written in Hindi")
@@ -232,7 +237,12 @@ def gemini_generate(system: str, user: str, timeout: float | None = None) -> tup
             break
         time.sleep(float(GEMINI["busy_retry_pause_s"]) * (attempt + 1))  # busy / over quota: brief pause, retry
     if r.status_code != 200:
-        raise ProviderUnavailable(f"Gemini HTTP {r.status_code}: {r.text[:200]}")
+        try:
+            msg = r.json().get("error", {}).get("message", "")
+        except ValueError:
+            msg = r.text
+        msg = " ".join(msg.split())[:220]  # Google's own message, without the JSON wrapping
+        raise ProviderUnavailable(f"HTTP {r.status_code}: {msg}")
     parts = r.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
     return "".join(p.get("text", "") for p in parts).strip(), model
 

@@ -360,6 +360,16 @@ Rebuild with `python -m safeher.fetch` (from `backend/`). Snapshots are committe
 - One download per corridor across workers (file lock); status on disk so any worker can answer; departures use the location's own timezone (`timezonefinder`); search is Google-biased to the map centre instead of restricted to demo areas; nearby works anywhere via Google.
 - **Measured problem:** public Overpass servers took 343 s for a small Mumbai corridor and over 10 minutes (stalled) for Toit → Koramangala (7.4 × 4.2 km). On-demand downloads are too slow for a demo → plan: pre-load full Delhi and Bengaluru from Geofabrik extracts and cut corridors locally.
 
+### 8.11 Full-city street data (implemented 16 Oct 2026: `backend/safeher/citydata.py`, `config/cities.json`)
+- **Source:** Geofabrik extracts `northern-zone-latest.osm.pbf` (224 MB, Delhi) and `southern-zone-latest.osm.pbf` (544 MB, Bengaluru), data to 15 Oct 2026, checksums verified, kept in `data/raw/osm/` (gitignored).
+- **Build** (`python -m safeher.citydata build`, about 1 minute per city): one pyosmium pass keeps walkable street segments (OSMnx "walk" rules) and the same place categories as the Overpass download, inside each city's bbox, stored in **DuckDB** (`data/cities/<id>.duckdb`, gitignored), sorted by location.
+  - Delhi: 997,981 segments, 14,581 places, 36 MB. Bengaluru: 612,470 segments, 24,455 places, 24 MB.
+- **Use:** a trip corridor inside a built city is cut from DuckDB (opened read-only, so all workers share it), simplified with OSMnx and saved in the normal area format. **Toit → Koramangala: ready in 2.5 s** (was > 10 min via Overpass). Route lengths match the Overpass-built network exactly (2,955 / 3,200 / 2,838 m for Hauz Khas → Saket). Outside the two cities, the on-demand Overpass download still applies.
+- **Known gap:** trip corridors don't map to an NCRB district, so their incidents signal is "no data" (weight redistributed).
+
+### 8.12 NASA night lights: blocked on a licence acceptance
+LAADS lists the 2025 VNP46A4 tiles for the token, but a file request with the token redirects to `/profiles/licenses/…` and then to the Earthdata login, so the account must accept the dataset licence once in a browser. Until then the lighting fallback stays OSM tags → lamps → road type.
+
 ## 9. Architecture (Google stack)
 
 ```
@@ -490,3 +500,6 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 16 Oct 2026 | **No silent fallbacks.** A configured key that fails (Gemini, Google Maps), or a Gemini answer that fails the fact checks twice, is an error shown to the user (HTTP 502 + message). A key that isn't set means the feature is off. Retries for "busy" (429/503) are kept: retrying isn't falling back | User: "I want it to fail if any token is not working or anything is wrong" |
 | 16 Oct 2026 | Gemini model and thinking level in `config/app.json` (`gemini-3.8-flash`, `thinkingLevel: low`) | `gemini-2.5-flash` is closed to new users; newer Flash models spent the whole output allowance thinking and returned no text |
 | 16 Oct 2026 | Tests hide every real key (Maps, Gemini, Earthdata) unless `SAFEHER_LIVE_GOOGLE=1` | A test had reached the real Gemini key |
+| 16 Oct 2026 | Pre-load full Delhi and Bengaluru from Geofabrik into DuckDB; cut trip corridors locally (§8.11) | Overpass on demand took 6–10+ min; DuckDB suits large read-only city tables shared by all workers |
+| 16 Oct 2026 | Place-name guardrail ignores names inside places that are in the facts, and matches whole words | Real Gemini answer naming "Indiranagar Traffic Police Station" was rejected because another place is called "Indiranagar" |
+| 16 Oct 2026 | Status files written via unique temp names | Shared temp file caused spurious "download failed" under concurrency |
