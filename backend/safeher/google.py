@@ -34,7 +34,12 @@ _G = config.app()["google"]
 
 
 class GoogleError(Exception):
-    """Any failure talking to Google; callers fall back to open data."""
+    """Any failure talking to Google; callers fall back to open data. `status` is Google's HTTP
+    status when there was one (e.g. 400 for an invalid place ID), else None."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 def api_key() -> str:
@@ -113,7 +118,7 @@ class GoogleClient:
                 detail = r.json().get("error", {}).get("message", "")[:200]
             except ValueError:
                 pass
-            raise GoogleError(f"HTTP {r.status_code}{': ' + detail if detail else ''}")
+            raise GoogleError(f"HTTP {r.status_code}{': ' + detail if detail else ''}", r.status_code)
         return r
 
     # ---- Map Tiles API --------------------------------------------------------------------

@@ -307,3 +307,14 @@ def test_endpoints_are_off_without_a_key(monkeypatch):
 def test_placeholder_key_is_ignored(monkeypatch):
     monkeypatch.setenv("GOOGLE_MAPS_API_KEY", "paste-your-maps-key-here")
     assert google.api_key() == "" and not google.enabled()
+
+
+def test_invalid_place_id_is_404_not_502(google_on):
+    """Found by fuzzing against the live API: Google answers 400 for a malformed place ID."""
+    class BadId(FakeGoogle):
+        def __call__(self, request):
+            if "/places/" in str(request.url):
+                return httpx.Response(400, json={"error": {"message": "The provided Place ID is not valid."}})
+            return super().__call__(request)
+    c = google_on(BadId())
+    assert c.get("/api/google/place/0000000000").status_code == 404

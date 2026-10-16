@@ -107,7 +107,8 @@
           }
         ]
       }
-    ]
+    ],
+    "max_routes": 1
   },
   "departure_window_days": 366
 }

@@ -138,11 +138,14 @@ def _shortest(graph: nx.MultiDiGraph, s: int, t: int, cost) -> list[int] | None:
         return None
 
 
-def candidate_paths(data: AreaData, origin: LatLon, dest: LatLon, edge_support: dict | None = None
-                    ) -> list[tuple[str, list[int]]]:
+def candidate_paths(data: AreaData, origin: LatLon, dest: LatLon, edge_support: dict | None = None,
+                    rank=None) -> list[tuple[str, list[int]]]:
     """Up to three distinct walking paths: shortest, most-supported (if edge_support given), alternative.
 
     edge_support maps frozenset({u, v}) → 0-100 support score for that street.
+    rank(path) → number: if given, every support setting is tried and the highest-ranked valid path
+    becomes "Most support" (the planner ranks by the full route score, which the per-street search
+    cost can't capture: it also weighs the weakest stretch). Without it, the first valid path wins.
     """
     s, _ = data.snap(origin)
     t, _ = data.snap(dest)
@@ -159,22 +162,31 @@ def candidate_paths(data: AreaData, origin: LatLon, dest: LatLon, edge_support: 
     base_len = path_length(data, shortest)
     found: list[tuple[str, list[int]]] = [("Shortest", shortest)]
 
-    def accept(label: str, path: list[int] | None) -> bool:
+    def valid(path: list[int] | None) -> bool:
         if path is None or path_length(data, path) > MAX_DETOUR * base_len:
             return False
-        if any(overlap(data, path, p) > MAX_OVERLAP for _, p in found):
+        return not any(overlap(data, path, p) > MAX_OVERLAP for _, p in found)
+
+    def accept(label: str, path: list[int] | None) -> bool:
+        if not valid(path):
             return False
         found.append((label, path))
         return True
 
     if edge_support:
         # Prefer better-supported streets: a street scoring 0 "costs" up to (1 + λ)× its length.
+        options: list[list[int]] = []
         for lam in SUPPORT_LAMBDAS:
             def by_support(u, v, d, lam=lam):
                 length = min(x["length"] for x in d.values())
                 return length * (1 + lam * (1 - edge_support.get(frozenset((u, v)), 50.0) / 100))
-            if accept("Most support", _shortest(G, s, t, by_support)):
-                break
+            path = _shortest(G, s, t, by_support)
+            if valid(path) and path not in options:
+                options.append(path)
+                if rank is None:
+                    break
+        if options:
+            found.append(("Most support", max(options, key=rank) if rank else options[0]))
 
     # Penalise streets already used, to find a genuinely different option.
     used = {frozenset(p) for _, path in found for p in zip(path, path[1:])}

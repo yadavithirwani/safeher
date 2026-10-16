@@ -276,8 +276,10 @@ def _google_routes(o: LatLon, d: LatLon) -> tuple[list[dict], str | None]:
         routes = google.client().walking_routes(o, d)
     except google.GoogleError as e:
         return [], f"Google routes unavailable ({e}); showing SafeHer routes only."
+    # Google's first route is the one it recommends; config decides how many to compare.
     external = [{"label": GOOGLE["route_label"] if i == 0 else f"{GOOGLE['route_label']} {i + 1}",
-                 "source": "google", "points": r["points"]} for i, r in enumerate(routes)]
+                 "source": "google", "points": r["points"]}
+                for i, r in enumerate(routes[: int(GOOGLE["max_routes"])])]
     _route_cache[key] = (time.time(), external)
     while len(_route_cache) > 64:
         _route_cache.popitem(last=False)
@@ -353,8 +355,11 @@ def nearby(lat: float, lon: float, kind: NearbyKind, depart_at: datetime | None 
 def _google_nearby(lat, lon, kind, local, limit, data):
     places = google.client().nearby(lat, lon, GOOGLE["nearby_types"][kind], NEARBY_RADIUS_M, limit * 2)
     out = []
+    wanted = set(GOOGLE["nearby_types"][kind])
     for g in places:
         if not data.area.contains(g["lat"], g["lon"]):
+            continue
+        if g["type"] not in wanted:  # e.g. a community centre that merely sits in a "police colony"
             continue
         if kind == "open_places" and g["open"] is not True:
             continue
@@ -411,6 +416,8 @@ def google_place(place_id: str = PathParam(pattern=r"^[A-Za-z0-9_-]{10,300}$"),
     try:
         p = google.client().place(place_id, session)
     except google.GoogleError as e:
+        if e.status in (400, 404):  # malformed or unknown place ID: the client's mistake, not ours
+            raise HTTPException(404, "Place not found.") from e
         raise HTTPException(502, f"Google place lookup failed: {e}") from e
     a = area_for(p["lat"], p["lon"])
     if a is None:

@@ -333,11 +333,23 @@ def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLo
     reports_key = hash(tuple((p, r.category, r.created_at, r.verification) for p, r in reports))
 
     backup = BackupCoverage(data, when)
+    scored: dict[tuple, list[PieceInfo]] = {}
+
+    def pieces_for(nodes: list[int]) -> list[PieceInfo]:
+        key = tuple(nodes)
+        if key not in scored:
+            scored[key] = score_pieces(ctx, path_edges(data, nodes))
+        return scored[key]
+
+    def route_score_of(nodes: list[int]) -> float:
+        rs = score_route([(p.length_m, p.segment) for p in pieces_for(nodes)], ctx.weights)
+        return -1.0 if rs.score is None else rs.score
+
     routes, lines = [], []
-    for label, nodes in candidate_paths(data, origin, dest, edge_support(ctx, reports_key)):
+    for label, nodes in candidate_paths(data, origin, dest, edge_support(ctx, reports_key), rank=route_score_of):
         edges = path_edges(data, nodes)
         line = [edges[0].points[0]] + [p for e in edges for p in e.points[1:]]
-        routes.append(_route_payload(ctx, label, score_pieces(ctx, edges), line, backup.describe(edges), "safeher"))
+        routes.append(_route_payload(ctx, label, pieces_for(nodes), line, backup.describe(edges), "safeher"))
         lines.append(line)
 
     notes = []

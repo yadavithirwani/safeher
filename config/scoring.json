@@ -1,6 +1,6 @@
 {
   "_comment": "The published SafeHer scoring model (design spec §7). Bump `version` whenever any value changes.",
-  "version": "2026-10-13.1",
+  "version": "2026-10-16.1",
   "weights": {
     "night": {
       "lighting": 0.3,
@@ -186,6 +186,7 @@
     "max_detour": 1.5,
     "max_overlap": 0.8,
     "support_lambdas": [
+      6.0,
       3.0,
       1.5,
       0.75
