@@ -36,7 +36,9 @@ def _env(name: str, default: str = "") -> str:
         load_dotenv(ENV_FILE)
     except ImportError:
         pass
-    return os.environ.get(name, default).strip()
+    value = os.environ.get(name, default).strip()
+    # Instructions use "paste-your-…-here" placeholders; never treat one as a real key.
+    return "" if value.lower().startswith("paste-") else value
 
 
 # --- Facts: the only material a model may use ---------------------------------------------

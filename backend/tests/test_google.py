@@ -302,3 +302,8 @@ def test_endpoints_are_off_without_a_key(monkeypatch):
     assert c.get("/api/google/tiles/light/1/0/0").status_code == 404
     assert c.get("/api/google/place/ChIJ_test_place_DEL").status_code == 404
     assert not any(c.get("/api/meta").json()["google"].values())
+
+
+def test_placeholder_key_is_ignored(monkeypatch):
+    monkeypatch.setenv("GOOGLE_MAPS_API_KEY", "paste-your-maps-key-here")
+    assert google.api_key() == "" and not google.enabled()
