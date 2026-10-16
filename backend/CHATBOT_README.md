@@ -1,6 +1,6 @@
 # SafeHer Companion — backend architecture draft
 
-**Status: proposed, not implemented.** Backend only; frontend integration comes later. Working name: **SafeHer Companion**, with an SOS mode. This assistant helps find evidence-backed options; it is not an emergency dispatcher or a guarantee of safety.
+**Status: initial backend implemented; live-provider validation blocked by network access.** Frontend integration comes later. Working name: **SafeHer Companion**, with an SOS mode. This assistant helps find evidence-backed options; it is not an emergency dispatcher or a guarantee of safety.
 
 Existing application: [current pipeline](../docs/CURRENT_PIPELINE.md).
 
@@ -100,7 +100,7 @@ Resolve category, search anchor (“here,” destination, map point) and time. R
 
 ## 5. Tool scope and data sources
 
-Names below are proposed Python interfaces, not existing endpoints.
+Names below are implemented Python interfaces.
 
 | Tool | Source | Contract / limit |
 |---|---|---|
@@ -118,7 +118,7 @@ Reuse backend service functions rather than making loopback HTTP calls to our ow
 
 ## 6. Backend API and conversation context
 
-Proposed endpoint: **`POST /api/chat`**, JSON first, no streaming requirement for MVP.
+Backend endpoint: **`POST /api/chat`**, JSON only.
 
 **Input:** message, optional server-issued session ID, explicit SOS flag, optional permission-derived location with accuracy/timestamp, selected route/trip reference, departure time and language. An emergency flag is additive; its absence does not mean a message is nonurgent.
 
@@ -151,7 +151,7 @@ Acceptance scenarios: pre-trip route comparison; ambiguous “home”; pharmacy 
 - Name: **SafeHer Companion** (SOS is a mode).
 - India, walking, existing pilot-area scoring, English/Hindi first.
 - Ollama initially; Gemini later; Maps credentials independent and optional for local tests.
-- Backend architecture/documentation now; no chatbot code, dependencies or frontend changes in this draft.
+- Initial backend implemented; no frontend changes. See operational notes below.
 
 Official references checked for this draft:
 - [ADK Ollama](https://adk.dev/agents/models/ollama/)
@@ -160,3 +160,56 @@ Official references checked for this draft:
 - [ADK Gemini](https://adk.dev/agents/models/google-gemini/)
 - [Google Maps API security](https://developers.google.com/maps/api-security-best-practices)
 - [Google Maps billing](https://developers.google.com/maps/billing-and-pricing/overview)
+
+## 10. Run the initial backend
+
+Implementation: `safeher/chatbot/agents.py` (team/model), `tools.py` (services), `maps.py` (Google REST), `models.py` (contracts/emergency), `service.py` (execution/sessions).
+
+Install from the repository root:
+
+```bash
+uv pip install --python .venv/bin/python -e './backend[dev]' --index-url https://pypi.ci.artifacts.walmart.com/artifactory/api/pypi/external-pypi/simple --allow-insecure-host pypi.ci.artifacts.walmart.com
+ollama pull llama3.2:3b
+```
+
+Configuration in ignored `backend/.env` (never commit keys):
+
+```dotenv
+CHATBOT_PROVIDER=ollama
+CHATBOT_MODEL=llama3.2:3b
+OLLAMA_API_BASE=http://localhost:11434
+GOOGLE_MAPS_API_KEY=<your-key>
+```
+
+`CHATBOT_MODEL` is separate from the existing explanation's `OLLAMA_MODEL`. Later use `CHATBOT_PROVIDER=gemini`, a Gemini model name and Gemini credentials. Pinned starting versions: ADK 2.12.0, LiteLLM 1.105.1.
+
+From `backend/`, run `../.venv/bin/uvicorn safeher.api:app --port 8765 --no-access-log`. Inspect `/docs` or call:
+
+```bash
+curl -s http://localhost:8765/api/chat -H 'Content-Type: application/json' \
+  -d '{"message":"Where is the nearest pharmacy to 28.5433, 77.2067?"}'
+curl -s http://localhost:8765/api/chat -H 'Content-Type: application/json' \
+  -d '{"message":"I do not feel safe","sos":true}'
+```
+
+Supply the returned `session_id` to continue. It is a bearer capability: keep it private. Sessions expire after 30 minutes idle; 200 sessions maximum. Run a single worker for this in-memory prototype. Expired records are removed on subsequent chat access, not by a background deletion timer.
+
+Each turn starts at the supervisor in a short-lived ADK session with bounded recent dialogue. Tool evidence is deleted after the turn; recent dialogue stays in memory until expiry. This prevents sticky handoffs. GPS is not automatically reused: supply a fresh timestamped location or explicit coordinates each turn. Coordinate matching is a basic guard, not robust natural-language confirmation parsing.
+
+### Current limits
+
+- Structured replies come from tool evidence; unchecked model prose is not returned. The model selects tools and clarifications. Normal templates are English; Hindi emergency text exists, but Hindi conversation quality is not validated.
+- Place-name resolution returns candidates and asks confirmation. Pre-trip tools initially require explicit coordinates and an ISO departure timestamp in recent dialogue. Convenient candidate confirmation and natural-language time normalization remain follow-up work.
+- No private live-trip references, automatic calls, dispatch, sharing, or frontend changes.
+- SOS returns immediately without searching Maps in that turn. A subsequent nonurgent request can search for assistance; automatic emergency enrichment is not implemented.
+- Place details and walking estimates are tool evidence; richer merged detail replies/directions actions are follow-up work. Current nearby actions are `show_place`; SOS offers `call` and `request_location`.
+- Google opening evidence describes current listings, not arbitrary future arrival-time availability.
+- Public deployment still needs rate limits, authentication decisions and provider logging/privacy review. Do not enable debug/trace export with real data.
+
+### Validation
+
+Run `cd backend && ../.venv/bin/python -m pytest tests/test_chatbot.py tests/test_chatbot_tools.py -q`.
+
+Tests exercise actual ADK Runner transfers/function tools using a scripted model, mocked Google HTTP, emergency handling without a model, session expiry/concurrency, tool budgets, location validation, fallbacks and evidence-only replies. These do not establish real Ollama routing/language quality.
+
+Live verification is currently blocked: model download failed DNS resolution directly, and the corporate proxy returned HTTP 407. Existing `llama3:latest` rejected a tool-call probe (HTTP 400). The Google Places probe failed at transport level; key validity, enabled APIs and billing remain unverified. Complete an actual Ollama → ADK → Google search before calling this live-provider validated.

@@ -2,6 +2,8 @@
 
 **Last reviewed: October 13, 2026.** This document describes executable code and data in this checkout, not the full product roadmap.
 
+**October 16 update:** an initial backend-only Google ADK Companion now adds intent routing and tool orchestration via `POST /api/chat`. See [chatbot implementation, setup and validation limits](../backend/CHATBOT_README.md). Real Ollama/Maps execution is blocked by network access; this guide's original AI-boundary discussion below describes the route-comparison UI, not the new backend agent endpoint.
+
 Start here for how the app works today. [DESIGN_SPEC.md](DESIGN_SPEC.md) describes the broader intended product and includes features that do not exist yet. Update this guide when implementation changes.
 
 ## 1. At a glance

@@ -10,6 +10,10 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 
 **[Read the end-to-end pipeline, inputs, outputs and feature status](docs/CURRENT_PIPELINE.md)** — the source of truth for what is implemented today, including the exact AI boundary, datasets, scoring, Plan B Coverage, live sharing, API contracts and limitations. [The design spec](docs/DESIGN_SPEC.md) also includes planned features; it is not an implementation checklist.
 
+## Companion chatbot backend
+
+Initial Google ADK supervisor/specialist agents and `POST /api/chat` are implemented, with Ollama configuration, Google Maps tools and a model-independent SOS response. **Live model/Maps validation is currently blocked by network access.** Setup, tests and limitations: [backend/CHATBOT_README.md](backend/CHATBOT_README.md). Frontend integration comes later.
+
 ## Demo
 
 [![SafeHer demo: Hauz Khas Metro to Select Citywalk, Delhi, at 9:30 PM. Click to play the video.](docs/media/demo-poster.jpg)](docs/media/safeher-demo.mp4)
