@@ -15,7 +15,7 @@ Four sources are fetched once by the build pipeline into `data/safeher.duckdb`; 
 | OpenStreetMap (Geofabrik) | Build | None | On rebuild (daily extracts) | `segments`, `places`, `districts` | Walking network, lit streets and lamps (scored and drawn), open places, search, district lookup |
 | NASA Black Marble VNP46A4 | Build | Earthdata token | Yearly product | `night_lights` | Measured lighting where OSM has no tags or lamps; the night-glow map layer (areas, not single lamps) |
 | NCRB · India Data Portal | Build | None | Yearly (latest: 2022) | `incidents` | Delhi police-district figure for each point on a route, low confidence |
-| Bengaluru City Police · OpenCity | Build (planned) | None | Yearly | `city_stats` | City-wide trend shown as context, not scored |
+| Bengaluru City Police · OpenCity | Build | None | Yearly (latest: 2023) | `city_stats` | City-wide figures shown as context on Bengaluru trips; never scored (no district split) |
 | Google Maps Platform | Live | API key | Every request | Nothing (place IDs only) | Map, search, open-now, comparison route, Street View |
 | Gemini | Live | API key | Every new trip | Nothing | Plain-language explanation after fact checks |
 | People using SafeHer | Live | None | As they use it | `safeher.sqlite3` | Community reports, live-sharing sessions |

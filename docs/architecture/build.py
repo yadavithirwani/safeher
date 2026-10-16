@@ -31,7 +31,7 @@ sources = [
     ("Geofabrik OSM extracts", "streets, lit tags, places, lamps, districts", "build · no key", False),
     ("NASA Black Marble (LAADS)", "night lights, ~500 m pixels", "build · Earthdata token", False),
     ("NCRB via India Data Portal", "Delhi crimes against women, by district", "build · no key", False),
-    ("Bengaluru City Police · OpenCity", "city crime trend 2021–2023", "build · no key · planned", True),
+    ("Bengaluru City Police · OpenCity", "city-wide crimes against women 2021–23", "build · no key", False),
     ("Google Maps Platform", "tiles, places, routes, Street View", "live · API key", False),
     ("Gemini API", "route explanations", "live · API key", False),
     ("People using SafeHer", "reports, live GPS while sharing", "live · in the app", False),
@@ -64,7 +64,7 @@ for m in mids[:4]:
 # Reference DuckDB
 f1.append(box(DX, by, DW, bh, "box store", dashed=True))
 for j, line in enumerate(["safeher.duckdb", "read-only, shared by workers", "segments · 1.6 M streets",
-                          "places · 84 k", "night_lights · 21 k pixels", "districts → incidents", "city_stats (planned)"]):
+                          "places · 84 k", "night_lights · 21 k pixels", "districts → incidents", "city_stats · Bengaluru"]):
     f1.append(text(DX + 14, by + 26 + j * 22, line, "t strong" if j == 0 else "t small"))
 f1.append(arrow([(BX + BW, by + bh / 2), (DX - 4, by + bh / 2)], "writes", (BX + BW + DX) / 2, by + bh / 2 - 8))
 
@@ -194,7 +194,7 @@ TABLE = [
     ("OpenStreetMap (Geofabrik)", "Build", "None", "On rebuild (daily extracts)", "segments, places, districts", "Walking network, lit streets and lamps (scored and drawn), open places, search, district lookup"),
     ("NASA Black Marble VNP46A4", "Build", "Earthdata token", "Yearly product", "night_lights", "Measured lighting where OSM has no tags or lamps; the night-glow map layer (areas, not single lamps)"),
     ("NCRB · India Data Portal", "Build", "None", "Yearly (latest: 2022)", "incidents", "Delhi police-district figure for each point on a route, low confidence"),
-    ("Bengaluru City Police · OpenCity", "Build (planned)", "None", "Yearly", "city_stats", "City-wide trend shown as context, not scored"),
+    ("Bengaluru City Police · OpenCity", "Build", "None", "Yearly (latest: 2023)", "city_stats", "City-wide figures shown as context on Bengaluru trips; never scored (no district split)"),
     ("Google Maps Platform", "Live", "API key", "Every request", "Nothing (place IDs only)", "Map, search, open-now, comparison route, Street View"),
     ("Gemini", "Live", "API key", "Every new trip", "Nothing", "Plain-language explanation after fact checks"),
     ("People using SafeHer", "Live", "None", "As they use it", "safeher.sqlite3", "Community reports, live-sharing sessions"),
@@ -277,7 +277,7 @@ td:first-child {{ font-weight: 600; }}
     <div class="legend" aria-label="Legend">
       <span><i class="sw bld"></i>fetched once by the build</span>
       <span><i class="sw live"></i>called live, nothing stored</span>
-      <span><i class="sw dash"></i>database file, or planned</span>
+      <span><i class="sw dash"></i>database file</span>
     </div>
   </header>
 

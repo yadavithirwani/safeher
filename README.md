@@ -37,6 +37,7 @@ This downloads everything SafeHer needs into one file, `data/safeher.duckdb` (~1
 | [Geofabrik](https://download.geofabrik.de/asia/india/) OpenStreetMap extracts (northern + southern zone) | ~780 MB, checksum-verified, cached in `data/raw/` | Walkable streets (Delhi ~1.0 M segments, Bengaluru ~0.6 M), 84 k places, street lamps, district boundaries |
 | NASA Black Marble VNP46A4 (needs the Earthdata token) | ~380 MB, cached in `data/raw/` | Night-light brightness, ~460 m pixels, for both cities |
 | NCRB crimes against women, via [India Data Portal](https://indiadataportal.com) | ~1 MB | Delhi police-district figures (public-space offences, 2019/21/22) |
+| Bengaluru City Police, *Crime in Bengaluru 2023*, via [OpenCity](https://data.opencity.in) | < 1 KB | City-wide molestation and insulting-modesty cases, 2021–23 (context only: no district split is published) |
 
 The new database is swapped in only if every check passes. Check what you have with `.venv/bin/python -m safeher.data info`; rebuild one city with `--city delhi`.
 
@@ -65,7 +66,7 @@ A trip is planned on a **corridor** (both points plus 1.2 km) cut from the city'
 1. **Lighting:** OSM `lit` tags and mapped lamps, NASA night lights where those are missing, else an estimate from road type
 2. **Transit:** distance to bus, metro and rail stops
 3. **Safe spaces:** police, hospitals, pharmacies and shops likely open at that time
-4. **Historical incidents:** NCRB police-district figures (Delhi only; low confidence)
+4. **Historical incidents:** NCRB police-district figures in Delhi (low confidence). Bengaluru publishes only city-wide figures, shown as context but not scored
 5. **Community reports:** recent reports from people using SafeHer
 
 Each signal carries a confidence, and missing data is never scored as bad. Gemini then explains the result in plain language; its answer is fact-checked against the plan before it is shown.

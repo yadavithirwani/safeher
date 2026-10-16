@@ -118,6 +118,14 @@ def incident_at(city: City, p: LatLon) -> tuple[float, float, str] | None:
                        f"{rank} of {total} in {city.name} (1 = fewest)")
 
 
+@lru_cache(maxsize=None)
+def city_stats(city_id: str) -> tuple[str, dict[int, int]] | None:
+    """City-wide police figures (context only): (source, {year: cases summed over the configured heads})."""
+    rows = con().execute("SELECT source, year, sum(cases) FROM city_stats WHERE city = ? GROUP BY source, year "
+                         "ORDER BY year", [city_id]).fetchall()
+    return (rows[0][0], {y: int(n) for _, y, n in rows}) if rows else None
+
+
 # --- Corridors ------------------------------------------------------------------------------------
 
 

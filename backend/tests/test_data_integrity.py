@@ -155,6 +155,27 @@ def test_districts_and_ncrb_line_up(city_id):
 
 
 @needs_data
+@pytest.mark.parametrize("city_id", CITY_IDS)
+def test_city_police_figures_match_the_config(city_id):
+    """City-wide police figures: every configured head and year, and no city without a configured source."""
+    cfg = CITIES[city_id].city_stats
+    rows = store.con().execute("SELECT year, head, cases FROM city_stats WHERE city = ?", [city_id]).fetchall()
+    if not cfg:
+        assert not rows
+        return
+    assert {(str(y), h) for y, h, _ in rows} == {(y, h) for y in cfg["years"] for h in cfg["heads"].values()}
+    assert all(n >= 0 for *_, n in rows)
+    report(f"{city_id} police", **{f"{h} {y}": n for y, h, n in sorted(rows)})
+
+
+@needs_data
+def test_bengaluru_police_figures_are_the_published_ones():
+    """Spot-check against the Bengaluru City Police 2023 report: molestation 573 → 731 → 1,135."""
+    _, by_year = store.city_stats("bengaluru")
+    assert by_year == {2021: 573 + 19, 2022: 731 + 29, 2023: 1135 + 60}
+
+
+@needs_data
 def test_district_lookup_matches_known_places():
     delhi = CITIES["delhi"]
     for (lat, lon), osm in {(28.5433, 77.2067): "South Delhi", (28.6315, 77.2167): "New Delhi",

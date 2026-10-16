@@ -61,9 +61,11 @@ def test_incidents_signal_is_honest_about_coverage(night_plan):
     value, confidence = values.pop()
     if night_plan["area"]["city"] == "bengaluru":
         assert value is None and confidence == 0  # one city-wide unit: not scored as zero
+        note = next(n for n in night_plan["data_notes"] if "Bengaluru City Police" in n)
+        assert "1,195" in note and "context only" in note  # 2023 city-wide figure, never scored
     else:
         assert value is not None and 0 < confidence <= 0.2
-    assert any("NCRB" in n for n in night_plan["data_notes"])
+        assert any("NCRB" in n for n in night_plan["data_notes"])
 
 
 def test_scores_lower_late_at_night_than_daytime():

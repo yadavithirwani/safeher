@@ -34,6 +34,7 @@ class City:
     landmarks: tuple[Landmark, ...] = field(default=(), compare=False)
     default_trip: tuple[str, str] | None = None
     districts: dict | None = field(default=None, compare=False, hash=False)  # OSM → NCRB mapping, if any
+    city_stats: dict | None = field(default=None, compare=False, hash=False)  # city-wide police figures, if any
 
     @property
     def tz(self) -> ZoneInfo:
@@ -82,7 +83,8 @@ def _load() -> dict[str, City]:
         b = c["bbox"]
         lms = tuple(Landmark(l["name"], float(l["lat"]), float(l["lon"])) for l in c.get("landmarks", []))
         city = City(c["id"], c["name"], c["timezone"], float(b["south"]), float(b["west"]), float(b["north"]),
-                    float(b["east"]), lms, tuple(c["default_trip"]) if c.get("default_trip") else None, c.get("districts"))
+                    float(b["east"]), lms, tuple(c["default_trip"]) if c.get("default_trip") else None, c.get("districts"),
+                    c.get("city_stats"))
         for lm in lms:
             if not city.contains(lm.lat, lm.lon):
                 raise RuntimeError(f"config/cities.json: landmark {lm.name!r} is outside {city.name}")

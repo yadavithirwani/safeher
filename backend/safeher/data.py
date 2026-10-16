@@ -8,7 +8,8 @@ Sources (each fetched once per build, nothing at request time):
   OpenStreetMap    Geofabrik regional extract (.osm.pbf, checksum-verified): walkable street segments
                    (OSMnx "walk" rules), places used for scoring and quick actions, district boundaries
   Night lights     NASA Black Marble VNP46A4 via LAADS (needs EARTHDATA_TOKEN in backend/.env)
-  Crime            NCRB district-wise crimes against women via the India Data Portal (CKAN, no key)
+  Crime            NCRB district-wise crimes against women via the India Data Portal (CKAN, no key);
+                   city-wide police figures where a city publishes them (Bengaluru City Police via OpenCity)
 
 The new database is written next to the old one and swapped in only after every check passes, so a
 failed build never leaves the app without data. All failures are errors; nothing is skipped silently.
@@ -189,13 +190,7 @@ def incidents(city: dict) -> list:
     if not d:
         return []
     n = C["ncrb"]
-    path = RAW / "ncrb" / Path(n["url"]).name
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        r = httpx.get(n["url"], timeout=60, follow_redirects=True, headers={"User-Agent": USER_AGENT})
-        r.raise_for_status()
-        path.write_bytes(r.content)
-    rows = [r for r in csv.DictReader(io.StringIO(path.read_text(encoding="utf-8-sig")))
+    rows = [r for r in csv.DictReader(io.StringIO(_download(n["url"], "ncrb")))
             if r["state_name"] == d["ncrb_state"] and r["year"] in n["years"]
             and r["registration_circles"] not in d["ncrb_exclude"]]
     counts: dict[str, list[float]] = {}
@@ -210,6 +205,31 @@ def incidents(city: dict) -> list:
              float(n["confidence"]), ",".join(n["years"])) for k, a in sorted(avg.items())]
 
 
+def _download(url: str, folder: str) -> str:
+    """Fetch a small source file once into data/raw/<folder>/ and return its text."""
+    path = RAW / folder / Path(url).name
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        r = httpx.get(url, timeout=60, follow_redirects=True, headers={"User-Agent": USER_AGENT})
+        r.raise_for_status()
+        path.write_bytes(r.content)
+    return path.read_text(encoding="utf-8-sig")
+
+
+def city_stats(city: dict) -> list:
+    """City-wide police figures (context only): (city, source, year, head, cases) per configured head."""
+    s = city.get("city_stats")
+    if not s:
+        return []
+    rows = {r["Type of Crime"].strip(): r for r in csv.DictReader(io.StringIO(_download(s["url"], "police")))}
+    missing = [h for h in s["heads"] if h not in rows] + [
+        f"{y} Reported" for y in s["years"] if f"{y} Reported" not in next(iter(rows.values()), {})]
+    if missing:
+        raise RuntimeError(f"{city['name']} police figures: not in the file (has its format changed?): {missing}")
+    return [(city["id"], s["source"], int(y), label, int(rows[h][f"{y} Reported"]))
+            for h, label in s["heads"].items() for y in s["years"]]
+
+
 # --- Build ----------------------------------------------------------------------------------------
 
 SCHEMA = """
@@ -221,6 +241,7 @@ CREATE TABLE districts (city VARCHAR, name VARCHAR, wkt VARCHAR);
 CREATE TABLE night_lights (city VARCHAR, lat DOUBLE, lon DOUBLE, radiance DOUBLE);
 CREATE TABLE incidents (city VARCHAR, district VARCHAR, avg_cases DOUBLE, percentile DOUBLE, confidence DOUBLE,
                         years VARCHAR);
+CREATE TABLE city_stats (city VARCHAR, source VARCHAR, year INTEGER, head VARCHAR, cases INTEGER);
 CREATE TABLE sources (city VARCHAR, source VARCHAR, detail VARCHAR, built_at VARCHAR);
 """
 
@@ -246,6 +267,10 @@ def check(con, city: dict) -> list[str]:
         osm_names = {r[0] for r in con.execute("SELECT name FROM districts WHERE city = ?", [cid]).fetchall()}
         if not set(city["districts"]["osm_to_ncrb"]) <= osm_names:
             problems.append(f"OSM districts missing: {sorted(set(city['districts']['osm_to_ncrb']) - osm_names)}")
+    if city.get("city_stats"):
+        want = len(city["city_stats"]["heads"]) * len(city["city_stats"]["years"])
+        if q("SELECT count(*) FROM city_stats WHERE city = ? AND cases >= 0") != want:
+            problems.append("city-wide police figures incomplete")
     return problems
 
 
@@ -264,8 +289,11 @@ def build(only: list[str] | None = None) -> None:
     keep = [c["id"] for c in C["cities"] if c not in cities]
     if keep and OUTPUT.exists():  # rebuilding some cities: carry the others over unchanged
         con.execute(f"ATTACH '{OUTPUT}' AS old (READ_ONLY)")
-        for t in ("segments", "places", "districts", "night_lights", "incidents", "sources"):
-            con.execute(f"INSERT INTO {t} SELECT * FROM old.{t} WHERE city IN ({','.join('?' * len(keep))})", keep)
+        old_tables = {r[0] for r in con.execute("SELECT table_name FROM information_schema.tables "
+                                               "WHERE table_catalog = 'old'").fetchall()}
+        for t in ("segments", "places", "districts", "night_lights", "incidents", "city_stats", "sources"):
+            if t in old_tables:  # a table added since the old build has nothing to carry over
+                con.execute(f"INSERT INTO {t} SELECT * FROM old.{t} WHERE city IN ({','.join('?' * len(keep))})", keep)
         con.execute("DETACH old")
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     for city in cities:
@@ -279,12 +307,16 @@ def build(only: list[str] | None = None) -> None:
         _say(f"  NASA night lights: {len(lights):,} pixels")
         inc = incidents(city)
         _say(f"  NCRB: {len(inc)} police districts" if inc else "  NCRB: no sub-city data for this city")
+        stats = city_stats(city)
+        if stats:
+            _say(f"  City police: {len(stats)} city-wide figures ({stats[0][1]})")
         for name, rows, cols in (
                 ("segments", segs, ["city", "way", "u", "v", "lat1", "lon1", "lat2", "lon2", "length", *EDGE_TAGS]),
                 ("places", places, ["city", "osm", "lat", "lon", "tags"]),
                 ("districts", districts, ["city", "name", "wkt"]),
                 ("night_lights", lights, ["city", "lat", "lon", "radiance"]),
-                ("incidents", inc, ["city", "district", "avg_cases", "percentile", "confidence", "years"])):
+                ("incidents", inc, ["city", "district", "avg_cases", "percentile", "confidence", "years"]),
+                ("city_stats", stats, ["city", "source", "year", "head", "cases"])):
             if rows:
                 df = pd.DataFrame(rows, columns=cols)
                 con.register("df", df)
@@ -292,7 +324,8 @@ def build(only: list[str] | None = None) -> None:
                 con.unregister("df")
         for source, detail in (("openstreetmap", f"{city['extract']} (md5 verified)"),
                                ("night_lights", f"{C['night_lights']['product']} {C['night_lights']['year']}"),
-                               ("ncrb", ",".join(C["ncrb"]["years"]) if inc else "none")):
+                               ("ncrb", ",".join(C["ncrb"]["years"]) if inc else "none"),
+                               ("city_police", stats[0][1] if stats else "none")):
             con.execute("INSERT INTO sources VALUES (?, ?, ?, ?)", [city["id"], source, detail, stamp])
         problems = check(con, city)
         if problems:
@@ -316,7 +349,7 @@ def info() -> None:
     con = duckdb.connect(str(OUTPUT), read_only=True)
     for (cid,) in con.execute("SELECT DISTINCT city FROM segments ORDER BY 1").fetchall():
         n = {t: con.execute(f"SELECT count(*) FROM {t} WHERE city = ?", [cid]).fetchone()[0]
-             for t in ("segments", "places", "districts", "night_lights", "incidents")}
+             for t in ("segments", "places", "districts", "night_lights", "incidents", "city_stats")}
         built = con.execute("SELECT max(built_at) FROM sources WHERE city = ?", [cid]).fetchone()[0]
         print(f"{cid}: " + ", ".join(f"{v:,} {k}" for k, v in n.items()) + f" · built {built}")
     con.close()

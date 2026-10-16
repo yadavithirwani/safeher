@@ -152,7 +152,21 @@
           "lon": 77.6033
         }
       ],
-      "districts": null
+      "districts": null,
+      "city_stats": {
+        "_comment": "City-wide only (no police-district split is published), so it is shown as context and never changes route scores. Same public-space heads as NCRB for Delhi.",
+        "source": "Bengaluru City Police, Crime in Bengaluru 2023 (via OpenCity, public domain)",
+        "url": "https://data.opencity.in/dataset/d253f099-2766-4cb8-8732-9cf996f2ffde/resource/87c19fe3-cfdc-4e4f-9ff7-fb7a76fc5dd8/download/dc918a6a-75d6-4fb7-bfc4-01e480f655b4.csv",
+        "heads": {
+          "Molestation (354 IPC)": "molestation",
+          "Insulting Modesty of Women (509 IPC)": "insulting modesty"
+        },
+        "years": [
+          "2021",
+          "2022",
+          "2023"
+        ]
+      }
     }
   ]
 }

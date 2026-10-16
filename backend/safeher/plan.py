@@ -237,8 +237,17 @@ def describe(pieces: list[PieceInfo], local: datetime) -> tuple[dict, list[str]]
 
 def incident_note(ctx: TripContext) -> str:
     if not ctx.city.districts:
-        return (f"No sub-city incident data for {ctx.city.name} (NCRB reports it as one unit); "
-                "this signal's weight is shared across the others.")
+        stats = store.city_stats(ctx.city.id)
+        if not stats:
+            return (f"No sub-city incident data for {ctx.city.name} (NCRB reports it as one unit); "
+                    "this signal's weight is shared across the others.")
+        source, by_year = stats
+        heads = " and ".join(ctx.city.city_stats["heads"].values()) if ctx.city.city_stats else "public-space"
+        first, last = min(by_year), max(by_year)
+        return (f"{source.split(',')[0]}, city-wide: {by_year[last]:,} {heads} cases reported in {last} "
+                f"(vs {by_year[first]:,} in {first}). No police-district figures are published for "
+                f"{ctx.city.name}, so this is context only and the same for every route; this signal's weight "
+                "is shared across the others.")
     if not ctx.seen_districts:
         return (f"No NCRB police-district figures for this part of {ctx.city.name}; "
                 "this signal's weight is shared across the others.")
