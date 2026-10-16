@@ -1,7 +1,8 @@
 """Plain-language route explanations, grounded only in the computed plan (design spec §5.4).
 
-Providers (SAFEHER_LLM=auto, the default, uses Gemini when GEMINI_API_KEY is set):
-  - Gemini      — needs GEMINI_API_KEY in backend/.env (free key from Google AI Studio)
+Providers (SAFEHER_LLM=auto, the default, uses Gemini when it is configured):
+  - Gemini      — on Vertex AI when GOOGLE_CLOUD_PROJECT is set (Application Default Credentials:
+                  gcloud auth application-default login), else GEMINI_API_KEY (Google AI Studio)
   - Ollama      — opt-in with SAFEHER_LLM=ollama; local model OLLAMA_MODEL (default phi3:mini)
   - Template    — deterministic sentences built from the same facts; used when no model is configured
 
@@ -27,6 +28,8 @@ from . import config
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 LANGUAGES = {k: v["name"] for k, v in config.app()["languages"].items()}
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+VERTEX_URL = ("https://{host}/v1/projects/{project}/locations/{location}/publishers/google/models/"
+              "{model}:generateContent")
 DEFAULT_OLLAMA_URL = "http://localhost:11434/api/generate"
 
 
@@ -212,11 +215,45 @@ class ExplainFailed(Exception):
 GEMINI = config.app()["gemini"]
 
 
-def gemini_generate(system: str, user: str, timeout: float | None = None) -> tuple[str, str]:
+_adc = None  # cached Application Default Credentials (refreshed when the token expires)
+
+
+def _vertex_token() -> str:
+    """An OAuth token from Application Default Credentials (`gcloud auth application-default login`)."""
+    global _adc
+    import google.auth
+    import google.auth.exceptions
+    from google.auth.transport.requests import Request
+
+    try:
+        if _adc is None:
+            _adc, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        if not _adc.valid:
+            _adc.refresh(Request())
+    except google.auth.exceptions.GoogleAuthError as e:
+        _adc = None
+        raise ProviderUnavailable(f"Vertex AI sign-in failed (run: gcloud auth application-default login): {e}") from e
+    return _adc.token
+
+
+def gemini_target(model: str) -> tuple[str, dict]:
+    """Where to send a Gemini request: Vertex AI with ADC when GOOGLE_CLOUD_PROJECT is set, else the
+    Gemini API with GEMINI_API_KEY. Neither set: the feature is off."""
+    project = _env("GOOGLE_CLOUD_PROJECT")
+    if project:
+        location = _env("GOOGLE_CLOUD_LOCATION", GEMINI["vertex_location"])
+        host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
+        url = VERTEX_URL.format(host=host, project=project, location=location, model=model)
+        return url, {"Authorization": f"Bearer {_vertex_token()}", "x-goog-user-project": project}
     key = _env("GEMINI_API_KEY")
     if not key:
-        raise NotConfigured("GEMINI_API_KEY not set")
+        raise NotConfigured("neither GOOGLE_CLOUD_PROJECT (Vertex AI) nor GEMINI_API_KEY is set")
+    return GEMINI_URL.format(model=model), {"x-goog-api-key": key}
+
+
+def gemini_generate(system: str, user: str, timeout: float | None = None) -> tuple[str, str]:
     model = _env("GEMINI_MODEL", GEMINI["model"])
+    url, headers = gemini_target(model)
     timeout = float(GEMINI["timeout_s"]) if timeout is None else timeout
     gen = {"temperature": GEMINI["temperature"], "maxOutputTokens": GEMINI["max_output_tokens"]}
     if GEMINI.get("thinking_level"):
@@ -229,8 +266,7 @@ def gemini_generate(system: str, user: str, timeout: float | None = None) -> tup
     }
     for attempt in range(int(GEMINI["busy_retries"]) + 1):
         try:
-            r = httpx.post(GEMINI_URL.format(model=model), json=body, timeout=timeout,
-                           headers={"x-goog-api-key": key})
+            r = httpx.post(url, json=body, timeout=timeout, headers=headers)
         except httpx.HTTPError as e:
             raise ProviderUnavailable(f"Gemini unreachable: {e}") from e
         if r.status_code not in (429, 503):

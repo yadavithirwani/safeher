@@ -15,8 +15,10 @@ def no_real_google_by_default(monkeypatch):
     if os.environ.get("SAFEHER_LIVE_GOOGLE") != "1":
         monkeypatch.setattr(google, "api_key", lambda: "")
         # Every real key in backend/.env is hidden (an empty env var wins over .env in load_dotenv).
-        for name in ("GOOGLE_MAPS_API_KEY", "GEMINI_API_KEY", "EARTHDATA_TOKEN"):
+        for name in ("GOOGLE_MAPS_API_KEY", "GEMINI_API_KEY", "EARTHDATA_TOKEN", "GOOGLE_CLOUD_PROJECT",
+                     "GOOGLE_API_KEY", "CHATBOT_PROVIDER"):
             monkeypatch.setenv(name, "")
+        monkeypatch.delenv("GOOGLE_GENAI_USE_VERTEXAI", raising=False)
 
 
 @pytest.fixture(autouse=True)

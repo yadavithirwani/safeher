@@ -111,14 +111,15 @@
   },
   "departure_window_days": 366,
   "gemini": {
-    "_comment": "GEMINI_MODEL in backend/.env overrides model. Thinking is kept low: explanations are short and must be fast.",
+    "_comment": "GEMINI_MODEL in backend/.env overrides model. Thinking is kept low: explanations are short and must be fast. With GOOGLE_CLOUD_PROJECT set, Gemini runs on Vertex AI with Application Default Credentials (gcloud auth application-default login); GOOGLE_CLOUD_LOCATION overrides vertex_location.",
     "model": "gemini-3.8-flash",
     "thinking_level": "low",
     "max_output_tokens": 1024,
     "temperature": 0.2,
     "timeout_s": 25,
     "busy_retries": 2,
-    "busy_retry_pause_s": 1.5
+    "busy_retry_pause_s": 1.5,
+    "vertex_location": "global"
   },
   "default_city": "delhi",
   "trips": {

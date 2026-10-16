@@ -181,6 +181,8 @@ OLLAMA_API_BASE=http://localhost:11434
 GOOGLE_MAPS_API_KEY=<your-key>
 ```
 
+**Gemini on Vertex AI (ADC):** when `GOOGLE_CLOUD_PROJECT` is set in `backend/.env` and you have signed in with `gcloud auth application-default login`, HerSide defaults to `CHATBOT_PROVIDER=gemini` on Vertex AI (`GOOGLE_GENAI_USE_VERTEXAI=TRUE`, `GOOGLE_CLOUD_LOCATION=global`), with no API key stored. Set `CHATBOT_PROVIDER=ollama` to keep the local model.
+
 `CHATBOT_MODEL` is separate from the existing explanation's `OLLAMA_MODEL`. Later use `CHATBOT_PROVIDER=gemini`, a Gemini model name and Gemini credentials. Pinned starting versions: ADK 2.12.0, LiteLLM 1.105.1.
 
 From `backend/`, run `.venv/bin/uvicorn safeher.api:app --port 8765 --no-access-log`. Inspect `/docs` or call:

@@ -28,8 +28,15 @@ If the user's intent changes, transfer to the supervisor or the relevant peer.
 
 
 def model():
-    choice = os.getenv("CHATBOT_PROVIDER", "ollama")
+    # Default: Gemini on Vertex AI when a Cloud project is configured (ADC), else local Ollama.
+    choice = os.getenv("CHATBOT_PROVIDER") or ("gemini" if os.getenv("GOOGLE_CLOUD_PROJECT") else "ollama")
     if choice == "gemini":
+        if os.getenv("GOOGLE_CLOUD_PROJECT"):
+            # google-genai (used by ADK) reads these: Vertex AI with Application Default Credentials.
+            os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "TRUE")
+            os.environ.setdefault("GOOGLE_CLOUD_LOCATION", "global")
+        elif not os.getenv("GOOGLE_API_KEY") and os.getenv("GEMINI_API_KEY"):
+            os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]  # AI Studio key, ADK's variable name
         return os.getenv("CHATBOT_MODEL", "gemini-2.5-flash")
     if choice != "ollama":
         raise ValueError("CHATBOT_PROVIDER must be ollama or gemini")

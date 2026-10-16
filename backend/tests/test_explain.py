@@ -174,3 +174,58 @@ def test_known_place_containing_a_forbidden_name_is_allowed(facts):
     # …but the forbidden place on its own is still caught, and only as a whole word.
     assert not ex.check(good_text(facts) + f" It goes via {first_word}.", facts, "en", forbidden_names={first_word}).ok
     assert ex.check(good_text(facts) + " It is nice.", facts, "en", forbidden_names={"nic"}).ok
+
+
+# --- Gemini on Vertex AI (Application Default Credentials) ---------------------------------------
+
+
+def test_vertex_is_used_when_a_cloud_project_is_set(monkeypatch):
+    from safeher import explain as ex
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "safeher-demo")
+    monkeypatch.setenv("GEMINI_API_KEY", "also-set-but-vertex-wins")
+    monkeypatch.setattr(ex, "_vertex_token", lambda: "tok")
+    url, headers = ex.gemini_target("gemini-x")
+    assert url == ("https://aiplatform.googleapis.com/v1/projects/safeher-demo/locations/global/"
+                   "publishers/google/models/gemini-x:generateContent")
+    assert headers == {"Authorization": "Bearer tok", "x-goog-user-project": "safeher-demo"}
+    monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "asia-south1")
+    assert ex.gemini_target("gemini-x")[0].startswith("https://asia-south1-aiplatform.googleapis.com/")
+
+
+def test_api_key_is_used_without_a_cloud_project_and_nothing_is_off(monkeypatch):
+    from safeher import explain as ex
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    url, headers = ex.gemini_target("gemini-x")
+    assert "generativelanguage.googleapis.com" in url and headers == {"x-goog-api-key": "k"}
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    with pytest.raises(ex.NotConfigured):
+        ex.gemini_target("gemini-x")
+
+
+def test_missing_adc_with_a_cloud_project_is_an_error_not_off(monkeypatch):
+    """Strict: a configured Vertex project without a working sign-in must fail loudly."""
+    import google.auth
+    import google.auth.exceptions
+    from safeher import explain as ex
+
+    def no_adc(**kw):
+        raise google.auth.exceptions.DefaultCredentialsError("no credentials")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "safeher-demo")
+    monkeypatch.setattr(ex, "_adc", None)
+    monkeypatch.setattr(google.auth, "default", no_adc)
+    with pytest.raises(ex.ProviderUnavailable, match="application-default login") as e:
+        ex.gemini_target("gemini-x")
+    assert not isinstance(e.value, ex.NotConfigured)
+
+
+def test_herside_uses_gemini_on_vertex_when_a_cloud_project_is_set(monkeypatch):
+    import os
+    from safeher.chatbot import agents
+    monkeypatch.setattr(os, "environ", dict(os.environ))  # model() sets env vars: keep them in this test
+    os.environ.pop("GOOGLE_CLOUD_LOCATION", None)
+    os.environ.pop("GOOGLE_GENAI_USE_VERTEXAI", None)
+    os.environ["GOOGLE_CLOUD_PROJECT"] = "safeher-demo"
+    assert agents.model() == "gemini-2.5-flash"
+    assert os.environ["GOOGLE_GENAI_USE_VERTEXAI"] == "TRUE" and os.environ["GOOGLE_CLOUD_LOCATION"] == "global"
+    os.environ["GOOGLE_CLOUD_PROJECT"] = ""
+    assert not isinstance(agents.model(), str)  # no Cloud project: local Ollama, as before
