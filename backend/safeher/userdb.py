@@ -10,6 +10,7 @@ rows, and after any deletion the WAL is checkpointed and truncated so deleted da
 
 from __future__ import annotations
 
+import fcntl
 import sqlite3
 import threading
 from contextlib import closing, contextmanager
@@ -43,8 +44,12 @@ def _setup() -> None:
     if key in _ready:
         return
     DB_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with closing(_connect()) as conn:
-        conn.execute("PRAGMA journal_mode=WAL")
+    # Switching to WAL needs an exclusive lock and SQLite doesn't wait for it, so worker processes
+    # starting together take turns via a lock file (the thread lock only covers this process).
+    with open(DB_FILE.with_name(DB_FILE.name + ".setup-lock"), "a") as lock, closing(_connect()) as conn:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
+            conn.execute("PRAGMA journal_mode=WAL")
         for sql in SCHEMA:
             conn.execute(sql)
     for f in (DB_FILE, DB_FILE.with_name(DB_FILE.name + "-wal"), DB_FILE.with_name(DB_FILE.name + "-shm")):

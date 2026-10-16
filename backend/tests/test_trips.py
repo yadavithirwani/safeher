@@ -158,3 +158,19 @@ def test_stopped_location_leaves_no_bytes_on_disk(tmp_path, monkeypatch):
         assert not any(on_disk())
     finally:
         other_worker.close()
+
+
+def test_worker_processes_setting_up_a_new_database_together_dont_collide(tmp_path):
+    """Found when starting the server with 2 workers: one failed with "database is locked"."""
+    import subprocess
+    import sys
+    db = tmp_path / "fresh.sqlite3"
+    import time
+    start = time.time() + 2  # every process starts at the same instant, like workers booting together
+    code = ("import sys, time, pathlib; from safeher import userdb; userdb.DB_FILE = pathlib.Path(sys.argv[1])\n"
+            "time.sleep(max(0, float(sys.argv[2]) - time.time()))\n"
+            "with userdb.database() as db: db.execute('SELECT count(*) FROM reports')")
+    procs = [subprocess.Popen([sys.executable, "-c", code, str(db), str(start)], stderr=subprocess.PIPE)
+             for _ in range(12)]
+    errors = [p.communicate()[1].decode() for p in procs if p.wait() != 0]
+    assert not errors, errors[0]
