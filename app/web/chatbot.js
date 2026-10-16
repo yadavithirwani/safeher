@@ -4,7 +4,7 @@
   const get = (id) => document.getElementById(id);
   const dialog = get("chatbotDialog"), messages = get("chatbotMessages");
   const input = get("chatbotInput"), status = get("chatbotStatus");
-  let session = null, position = null, controller = null, generation = 0, locating = false;
+  let session = null, position = null, trip = null, controller = null, generation = 0, locating = false;
 
   function node(tag, text, parent) {
     const element = document.createElement(tag);
@@ -124,6 +124,8 @@
     input.value = "";
     busy(true);
     const payload = { message: text, session_id: session, sos, lang: "en" };
+    if (trip && !sos) payload.trip = trip;
+    trip = null;
     if (position && Date.now() - Date.parse(position.observed_at) <= 120000) payload.location = position;
     position = null;
     locationLabel();
@@ -162,6 +164,7 @@
   get("chatbotClose").addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => {
     position = null;
+    trip = null;
     generation += 1;
     controller?.abort(); controller = null; busy(false); locationLabel();
   });
@@ -175,13 +178,18 @@
       status.textContent = "Select an origin and destination in Directions first, or describe your trip below.";
       return;
     }
-    input.value = `Compare walking routes from confirmed origin ${state.origin.lat}, ${state.origin.lon} to confirmed destination ${state.dest.lat}, ${state.dest.lon}, departing ${departIso()}+05:30.`;
-    status.textContent = "Selected trip added. Review the coordinates and departure before sending.";
+    trip = {
+      origin: { lat: state.origin.lat, lon: state.origin.lon },
+      destination: { lat: state.dest.lat, lon: state.dest.lon },
+      depart_at: `${departIso()}+05:30`,
+    };
+    input.value = "For this walk, is the extra walking time worth it for better lighting and fewer weak stretches?";
+    status.textContent = `Trip attached: ${state.origin.name || "selected origin"} → ${state.dest.name || "selected destination"}, departing ${new Date(trip.depart_at).toLocaleString("en-IN")}. Attached for the next message only; review before sending.`;
     input.focus();
   });
   get("chatbotReset").addEventListener("click", () => {
     generation += 1; controller?.abort(); controller = null;
-    session = null; position = null; messages.replaceChildren();
+    session = null; position = null; trip = null; messages.replaceChildren();
     input.value = ""; busy(false); locationLabel(); welcome();
     status.textContent = "Cleared in this browser. Server-side context expires after 30 minutes idle.";
   });

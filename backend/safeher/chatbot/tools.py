@@ -92,6 +92,15 @@ async def search_nearby_places(kind: str, lat: float, lon: float, tool_context: 
     return retain(tool_context, result)
 
 
+async def search_near_current_location(kind: str, tool_context: ToolContext) -> dict:
+    """Find a supported place near the fresh location attached to THIS message. No coordinate arguments needed. Ask for a location attachment if missing."""
+    location = tool_context.state.get("turn:location")
+    if not location:
+        tool_context.state["turn:clarification"] = "location"
+        return {"error": "Attach a fresh location or provide a landmark first."}
+    return await search_nearby_places(kind, location["lat"], location["lon"], tool_context)
+
+
 async def get_place_details(place_id: str, tool_context: ToolContext) -> dict:
     """Get provider-specific details only for a place returned by search in this turn."""
     places = [p for e in tool_context.state.get("turn:evidence", []) for p in e.get("places", [])]
@@ -150,6 +159,45 @@ async def plan_supported_trip(origin_lat: float, origin_lon: float, destination_
     return retain(tool_context, {"routes": routes, "source": "safeher",
         "departure_local": result["departure_local"], "warnings": result["data_notes"],
         "disclaimer": result["disclaimer"]})
+
+
+async def compare_selected_trip(tool_context: ToolContext) -> dict:
+    """Compare support, lighting and weak stretches for the trip explicitly attached to this message. No coordinate or time arguments needed."""
+    trip = tool_context.state.get("turn:trip")
+    if not trip:
+        tool_context.state["turn:clarification"] = "origin"
+        return {"error": "Attach your selected trip first."}
+    result = await plan_supported_trip(trip["origin"]["lat"], trip["origin"]["lon"],
+        trip["destination"]["lat"], trip["destination"]["lon"], trip["depart_at"], tool_context)
+    if "routes" in result:
+        result["comparison"] = selected_trip_comparison(result["routes"])
+    return result
+
+
+def selected_trip_comparison(routes):
+    """Describe measured trade-offs without inventing a safety recommendation."""
+    scored = [route for route in routes if route.get("score") is not None]
+    if len(scored) < 2:
+        return "There aren't enough scored alternatives to compare this trip reliably."
+    shortest = min(scored, key=lambda route: route["distance_m"])
+    supported = max(scored, key=lambda route: route["score"])
+    if shortest is supported:
+        return "The shortest route also has the highest support score among these candidates; no longer route scores higher."
+    extra = supported["duration_min"] - shortest["duration_min"]
+    text = (f"For your selected walk, {supported['label']} takes {supported['duration_min']} minutes "
+        f"versus {shortest['duration_min']} for {shortest['label']} — about {extra} extra "
+        f"{'minute' if extra == 1 else 'minutes'}. "
+        f"Its support score is {supported['score']}/100 versus {shortest['score']}/100. ")
+    def lighting(route):
+        return next((item for item in route["breakdown"] if item["signal"] == "lighting"), None)
+    a, b = lighting(supported), lighting(shortest)
+    if a and b and a.get("value") is not None and b.get("value") is not None:
+        text += (f"Lighting evidence scores {a['value']}/100 versus {b['value']}/100 "
+            f"(confidence {a['confidence']} and {b['confidence']}); this is not verified street lighting. ")
+    text += (f"Mapped weak stretches: {len(supported['weak_stretches'])} versus "
+        f"{len(shortest['weak_stretches'])}. If that extra time is acceptable, the higher-support "
+        "route is worth considering, but incomplete data cannot establish which route is safe.")
+    return text
 
 
 def get_plan_b_coverage(route_label: str, tool_context: ToolContext) -> dict:
@@ -213,6 +261,8 @@ def render_evidence(evidence: list[dict]) -> ChatResponse:
                 response.reply = "Walking route comparison: " + "; ".join(
                     f"{r['label']}: {r['duration_min']} min, {r['distance_m']} m, support score {r['score']}"
                     for r in response.routes)
+                if item.get("comparison"):
+                    response.reply = item["comparison"]
                 response.warnings.extend(item.get("warnings", []))
                 response.warnings.append(item["disclaimer"])
             else:

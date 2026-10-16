@@ -7,7 +7,7 @@
 
 ## Requirements and command
 
-Start SafeHer, Ollama with the tool-capable `llama3.2:3b` model, and working Google Places credentials. Install Chrome and system ffmpeg. Use the repository virtual environment (Playwright and NetworkX are required).
+Start SafeHer, Ollama with the tool-capable `llama3.2:3b` model, (Google Places credentials are only needed for optional nearby-place tools). Install Chrome and system ffmpeg. Use the repository virtual environment (Playwright and NetworkX are required).
 
 ```bash
 # From the repository root:
@@ -25,9 +25,11 @@ The silent, captioned video covers routes/time-dependent evidence, Plan B route 
 
 The recorded question is:
 
-> Find the nearest pharmacy to these confirmed coordinates: 28.5433, 77.2067.
+> For this walk, is the extra walking time worth it for better lighting and fewer weak stretches?
 
-This worked in three consecutive live Ollama checks before recording. Explicit coordinates avoid the remaining location-resolution ambiguity of the small model. Search responses are real: the recorder asserts the `local_enquiry` intent and actual `google_places` records, and refuses to publish a failed/fallback chat. It does not fake replies or hide failures through response interception. Future model/provider responses can vary.
+The recorder clicks **Compare my selected trip** to attach origin, destination and departure as structured context; the user reviews a normal question, place labels and departure, not coordinate text. Ollama/ADK selects the pre-trip comparison tool. The backend recomputes the real plan and renders the measured extra minutes, support/lighting scores, confidence and weak-stretch counts. No model-generated facts or route fixtures are substituted. This question passed three consecutive live Ollama checks before recording; future responses can vary.
+
+Publication requires a real pre-trip response with at least two routes and the measured trade-off. Failed runs do not replace the previous video. The comparison is explicitly not a guarantee of safety.
 
 Only map assets are intercepted: cached MapLibre and an OSM walking-graph street map avoid external tile outages. Sharing GPS is Playwright-simulated and visibly labelled, never a real person's position. Sharing sessions are revoked in cleanup. No reports are submitted, no calls are placed, and no Google results are plotted on the OSM basemap.
 

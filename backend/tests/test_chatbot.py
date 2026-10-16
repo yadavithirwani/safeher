@@ -184,3 +184,84 @@ def test_unconfirmed_coordinates_do_not_call_maps(monkeypatch):
     monkeypatch.setattr(MapsClient, "nearby", forbidden)
     result = run(tools.search_nearby_places("pharmacy", 28, 77, SimpleNamespace(state={})))
     assert "error" in result
+
+
+def test_natural_during_trip_uses_attached_location(monkeypatch):
+    calls = []
+
+    async def nearby(self, kind, lat, lon):
+        calls.append((kind, lat, lon))
+        return {"places": [{"id": "fixture", "name": "Fixture police station", "kind": kind,
+            "lat": lat, "lon": lon, "source": "test_fixture", "distance_m": 100,
+            "distance_basis": "straight_line", "hours_basis": "unknown"}]}
+
+    monkeypatch.setattr(MapsClient, "nearby", nearby)
+    service = scripted_service(monkeypatch, [
+        ("transfer_to_agent", {"agent_name": "during_trip"}),
+        ("search_near_current_location", {"kind": "police"}), "Done"])
+    result = run(service.chat(ChatRequest(
+        message="I'm on my walk and need some assistance. Is there a police station nearby?",
+        location=Position(lat=28.5433, lon=77.2067, accuracy_m=5,
+                          observed_at=datetime.now(timezone.utc)))))
+    assert calls == [("police", 28.5433, 77.2067)]
+    assert result.intent == "during_trip"
+    assert not result.needs_clarification
+    assert result.places[0]["kind"] == "police"
+
+
+@pytest.mark.parametrize("age,accuracy", [(180, 5), (0, 150)])
+def test_current_location_tool_rejects_unusable_attachment(monkeypatch, age, accuracy):
+    async def forbidden(*args):
+        pytest.fail("Unusable attachment reached Maps")
+
+    monkeypatch.setattr(MapsClient, "nearby", forbidden)
+    service = scripted_service(monkeypatch, [
+        ("transfer_to_agent", {"agent_name": "during_trip"}),
+        ("search_near_current_location", {"kind": "police"}), "Done"])
+    result = run(service.chat(ChatRequest(message="Is there a police station nearby?",
+        location=Position(lat=28.5433, lon=77.2067, accuracy_m=accuracy,
+            observed_at=datetime.now(timezone.utc) - timedelta(seconds=age)))))
+    assert not result.places
+    assert result.needs_clarification
+    assert result.warnings
+
+
+def test_current_location_tool_requires_attachment():
+    context = SimpleNamespace(state={})
+    result = run(tools.search_near_current_location("police", context))
+    assert "error" in result
+    assert context.state["turn:clarification"] == "location"
+
+
+def test_selected_trip_comparison_no_coordinate_message(monkeypatch):
+    service = scripted_service(monkeypatch, [
+        ("transfer_to_agent", {"agent_name": "pre_trip"}),
+        ("compare_selected_trip", {}), "Done"])
+    result = run(service.chat(ChatRequest(
+        message="For this walk, is the extra walking time worth it for better lighting and fewer weak stretches?",
+        trip={"origin": {"lat": 28.5433, "lon": 77.2067},
+              "destination": {"lat": 28.5286, "lon": 77.2195},
+              "depart_at": "2026-10-16T21:30:00+05:30"})))
+    assert result.intent == "pre_trip"
+    assert len(result.routes) >= 2
+    assert "extra minute" in result.reply
+    assert "Lighting evidence" in result.reply
+    assert "Mapped weak stretches" in result.reply
+    assert "cannot establish which route is safe" in result.reply
+
+
+def test_selected_trip_requires_timezone():
+    client = TestClient(app)
+    result = client.post("/api/chat", json={"message": "Compare this trip", "trip": {
+        "origin": {"lat": 28.54, "lon": 77.2}, "destination": {"lat": 28.53, "lon": 77.21},
+        "depart_at": "2026-10-16T21:30:00"}})
+    assert result.status_code == 422
+
+
+def test_compare_selected_trip_requires_attachment():
+    context = SimpleNamespace(state={})
+    assert "error" in run(tools.compare_selected_trip(context))
+
+
+def test_comparison_missing_scores_is_not_a_recommendation():
+    assert "enough scored alternatives" in tools.selected_trip_comparison([{"score": None}])

@@ -16,16 +16,16 @@ Initial Google ADK supervisor/specialist agents and `POST /api/chat` are impleme
 
 ## Latest demo · HerSide Q&A + Plan B + live sharing
 
-[![SafeHer with HerSide chatbot, live Google Places results and route support.](docs/media/safeher-demo-herside-poster.jpg)](docs/media/safeher-demo-herside.mp4)
+[![SafeHer with HerSide pre-trip comparison of walking time, lighting evidence and route support.](docs/media/safeher-demo-herside-poster.jpg)](docs/media/safeher-demo-herside.mp4)
 
-**[Watch the latest captioned demo](docs/media/safeher-demo-herside.mp4)** — 4:48, 1440×900, approximately 39 MB. It covers:
+**[Watch the latest captioned demo](docs/media/safeher-demo-herside.mp4)** — 4:54, 1440×900, approximately 41 MB. It covers:
 - Delhi walking-route comparison, transparent signals and changing departure times
 - Plan B estimates, coverage gaps and uncertainty
 - Opt-in live sharing, recipient view, simulated movement and revoking the link
-- **HerSide Q&A powered by local Ollama**: a real pharmacy search with source-labelled Google Places results
+- **HerSide pre-trip Q&A powered by local Ollama**: whether extra walking time is worth better lighting evidence and fewer weak stretches
 - Model-independent SOS and explicit, one-shot chatbot location consent
 
-The pharmacy question includes explicit demo coordinates; chatbot replies and API results are not mocked. Sharing GPS is simulated and labelled. The recording uses a labelled cached OSM map. Only the latest recorder, video and poster are kept; earlier versions remain in Git history.
+The pre-trip question uses a reviewed structured trip attachment, not user-typed coordinates; computed route results are not mocked. Sharing GPS is simulated and labelled. The recording uses a labelled cached OSM map. Only the latest recorder, video and poster are kept; earlier versions remain in Git history.
 
 Recording instructions: [demo/README.md](demo/README.md).
 

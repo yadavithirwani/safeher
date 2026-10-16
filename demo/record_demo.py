@@ -14,7 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Page, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -23,7 +23,7 @@ SIZE = {"width": 1440, "height": 900}
 MEDIA = ROOT / "docs" / "media"
 NAME = "safeher-demo-herside"
 GPS = {"latitude": 28.5433, "longitude": 77.2067, "accuracy": 5}
-QUESTION = "Find the nearest pharmacy to these confirmed coordinates: 28.5433, 77.2067."
+QUESTION = "For this walk, is the extra walking time worth it for better lighting and fewer weak stretches?"
 
 
 DELHI = "#area=del-hauz-khas-saket&o=28.54330,77.20670,Hauz%2520Khas%2520Metro&d=28.52860,77.21950,Select%2520Citywalk%252C%2520Saket&t=1290"
@@ -328,24 +328,30 @@ def chat_chapter(demo, poster):
       cap.style.marginLeft = '0'; cap.style.bottom = '18px';
     }""")
     demo.caption("Meet <b>HerSide</b>: a Google ADK agent team, running on local <b>Ollama llama3.2:3b</b>.", 5)
-    demo.caption("Real Q&A: the agent chooses a search tool. The tool—not the model—supplies place facts.", 5)
-    page.locator("#chatbotInput").fill(QUESTION)
-    demo.caption("We provide demo coordinates explicitly. <b>No device location is collected</b> for this question.", 4)
+    demo.caption("Before leaving: <b>is a longer walk worth it for better route support?</b>", 4)
+    demo.click("#chatbotTrip")
+    assert page.locator("#chatbotInput").input_value() == QUESTION
+    demo.caption("Attach the selected trip with one click. <b>Review the places and departure time</b>—no coordinates to type.", 5)
     with page.expect_response(lambda response: response.url.endswith('/api/chat') and response.request.method == 'POST', timeout=90000) as pending:
         demo.click("#chatbotSend", pause=.2)
     response = pending.value
     body = response.json()
-    assert response.ok and body['intent'] == 'local_enquiry', 'Chat did not route to the place-search specialist'
-    assert body.get('places') and all(p.get('source') == 'google_places' for p in body['places']), 'Requires real Google results, not fixtures or fallback'
+    assert response.ok and body['intent'] == 'pre_trip', 'Expected pre-trip comparison'
+    assert not body.get('needs_clarification'), 'Selected trip must not require coordinate entry'
+    assert len(body.get('routes', [])) >= 2, 'Expected real computed route alternatives'
+    assert 'Lighting evidence' in body['reply'] and 'Mapped weak stretches' in body['reply']
+    assert 'extra minute' in body['reply'], 'Expected an evidence-based detour trade-off'
     page.locator(".herside-card").first.wait_for()
     demo.caption(None)
+    page.locator("#chatbotMessages .herside-message").last.evaluate(
+        "el => el.scrollIntoView({block: 'start'})")
     demo.wait(4)
     page.screenshot(path=str(poster))
-    demo.caption("Live <b>Google Places</b> results: names, source, listed hours and straight-line distance.", 5)
+    demo.caption("HerSide compares <b>extra time, lighting evidence, confidence and weak stretches</b> from the real plan.", 8)
     page.locator("#chatbotMessages").evaluate('(el) => el.scrollTop = 0')
     demo.wait(3)
     page.locator("#chatbotMessages").evaluate('(el) => el.scrollTop = el.scrollHeight')
-    demo.caption("Distances are not walking times. Listed hours do not verify availability or willingness to assist.", 5)
+    demo.caption("An evidence-based trade-off, not a safety promise. <b>Lighting data is incomplete</b>; you decide whether the detour is worthwhile.", 5)
     demo.caption(None)
     demo.click("#chatbotSOS")
     page.get_by_role('link', name='India emergency: 112').wait_for(timeout=15000)

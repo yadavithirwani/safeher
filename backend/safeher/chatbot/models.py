@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Position(BaseModel):
@@ -15,11 +15,30 @@ class Position(BaseModel):
     observed_at: datetime
 
 
+class TripPoint(BaseModel):
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
+
+
+class SelectedTrip(BaseModel):
+    origin: TripPoint
+    destination: TripPoint
+    depart_at: datetime
+
+    @field_validator("depart_at")
+    @classmethod
+    def require_timezone(cls, value):
+        if value.tzinfo is None:
+            raise ValueError("Departure needs a timezone")
+        return value
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     session_id: str | None = Field(default=None, min_length=20, max_length=100)
     sos: bool = False
     location: Position | None = None
+    trip: SelectedTrip | None = None
     lang: Literal["en", "hi"] = "en"
 
 

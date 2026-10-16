@@ -128,3 +128,29 @@ def test_native_modal_and_focus_trap(page):
     page.locator('#chatbotReset').focus()
     page.keyboard.press('Tab')
     assert page.locator('#chatbotClose').evaluate('(el) => el === document.activeElement')
+
+
+def test_selected_trip_is_structured_and_reviewed_before_sending(page):
+    page.evaluate('''() => {
+      window.state = {origin: {lat:28.5433, lon:77.2067, name:'Hauz Khas Metro'},
+                      dest: {lat:28.5286, lon:77.2195, name:'Select Citywalk'}};
+      window.departIso = () => '2026-10-16T21:30:00';
+    }''')
+    payloads = []
+    def chat(route):
+        payloads.append(route.request.post_data_json)
+        route.fulfill(json={'reply': 'Measured comparison', 'routes': []})
+    page.route('**/api/chat', chat)
+    page.locator('#chatbotTrip').click()
+    assert not payloads
+    assert '28.5433' not in page.locator('#chatbotInput').input_value()
+    assert 'Hauz Khas Metro' in page.locator('#chatbotStatus').inner_text()
+    page.locator('#chatbotSend').click()
+    page.get_by_text('Measured comparison', exact=True).wait_for()
+    assert payloads[0]['trip']['origin']['lat'] == 28.5433
+    assert payloads[0]['trip']['depart_at'].endswith('+05:30')
+    page.locator('#chatbotReset').click()
+    page.locator('#chatbotInput').fill('New question')
+    page.locator('#chatbotSend').click()
+    page.get_by_text('Measured comparison', exact=True).wait_for()
+    assert 'trip' not in payloads[1]

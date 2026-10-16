@@ -77,7 +77,7 @@ class ChatService:
         try:
             runner = (self.runner_factory(sessions) if self.runner_factory else
                       Runner(app_name=APP_NAME, agent=build_agent_team(), session_service=sessions))
-            warnings = location_warnings(req.location)
+            warnings = [] if req.trip and req.location is None else location_warnings(req.location)
             observed = {"turn:coordinate_evidence": " ".join(conversation.messages + [req.message])}
             if req.location and not warnings:
                 observed["turn:location"] = {"lat": req.location.lat, "lon": req.location.lon}
@@ -87,6 +87,11 @@ class ChatService:
                        "current_time": datetime.now(timezone.utc).isoformat()}
             if req.location and not warnings:
                 context["confirmed_current_location"] = req.location.model_dump(mode="json")
+            if req.trip:
+                trip = req.trip.model_dump(mode="json")
+                observed["turn:trip"] = trip
+                observed["turn:coordinate_evidence"] += " " + json.dumps(trip)
+                context["confirmed_selected_trip"] = trip
             content = types.Content(role="user", parts=[types.Part(text=json.dumps(context, ensure_ascii=False))])
             async with asyncio.timeout(60):
                 async for event in runner.run_async(user_id=user, session_id=session.id,

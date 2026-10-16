@@ -203,7 +203,7 @@ Solid arrows show request/data flow; dotted arrows show model configuration. The
 ```mermaid
 flowchart TB
     subgraph BROWSER[Browser - HerSide]
-        INPUT[Question or reviewed selected-trip text]
+        INPUT[Question and optional reviewed selected-trip attachment]
         GPS[Explicit one-shot GPS attachment]
         MEMORY[In-page history and session token - no persistent browser storage]
         VIEW[Text-only replies, source-labelled cards and warnings]
@@ -258,7 +258,8 @@ flowchart TB
         NEARBY[search_nearby_places]
         DETAILS[get_place_details - same-turn search IDs only]
         WALK[estimate_walking_access - unscored]
-        PLAN[plan_supported_trip and get_plan_b_coverage]
+        PLAN[compare_selected_trip, plan_supported_trip
+and get_plan_b_coverage]
         ASK[ask_clarification]
         ESCALATE[get_emergency_actions]
         EVIDENCE[Per-turn source-labelled evidence\nCompact planning facts - no full route geometry]
@@ -305,8 +306,8 @@ sequenceDiagram
     participant A as ADK supervisor / specialist
     participant T as Validated tools
     participant D as SafeHer / local OSM / Google
-    U->>H: Question, reviewed trip text, optional location attachment
-    H->>API: POST /api/chat: message, session_id, sos, location, lang
+    U->>H: Question, structured selected trip, optional location attachment
+    H->>API: POST /api/chat: message, session_id, sos, location, trip, lang
     alt Explicit SOS or recognized urgent phrase
         API-->>H: Fixed India 112 response and request-location action
     else Ordinary turn
@@ -324,13 +325,13 @@ sequenceDiagram
 ```
 
 1. **Open and compose:** launch **HerSide · Ask for help**. Native modal, keyboard focus handling, suggested pharmacy question, selected-trip shortcut, separate SOS button and persistent India 112 link are available. UI currently submits English (`lang: "en"`); API accepts `en`/`hi`, but Hindi journey quality is not fully validated.
-2. **Review trip context:** “Compare my selected trip” copies selected origin/destination and departure into the input for review. It does not submit automatically. There is no automatic map/chat synchronization, private-trip lookup, persistent home address, or live-sharing access.
+2. **Review trip context:** “Compare my selected trip” attaches selected origin/destination and timezone-aware departure as structured `trip` context and fills a natural trade-off question. It does not submit automatically; the attachment is sent only with the next message and cleared on send/close/reset. There is no automatic map/chat synchronization, private-trip lookup, persistent home address, or live-sharing access.
 3. **Attach location only by choice:** attachment invokes `getCurrentPosition`, not `watchPosition`. Coordinates, accuracy and observation timestamp are sent only on the next submission. UI discards an attachment older than two minutes and clears it after sending, removing it or closing the dialog. Merely opening chat never requests GPS.
 4. **Validate and check urgency first:** Pydantic validates request sizes, coordinates and language. Explicit `sos=true` or recognized urgent English/Hindi phrases return fixed India 112 guidance **before** session lookup, locking, ADK or external calls. This is phrase-based, not a reliable danger classifier. An agent can also escalate through `get_emergency_actions`. The fast response does not automatically start a nearby search; that needs a later turn.
 5. **Recover bounded conversation:** an opaque bearer session token is sent in the JSON body, hashed for server lookup. Sessions are process-memory only, capped at 200, with a 30-minute idle TTL and pruning during session access. Each keeps the last six user/reply strings (roughly three turns), not a full persistent transcript. Concurrent ordinary turns for one session get HTTP 409; expired/missing sessions get 404; capacity exhaustion gets 503. UI resets its token on 404 and asks the user to resend.
 6. **Build fresh ADK context:** each turn gets a temporary `InMemorySessionService` session, deleted after the turn. Context includes language, current UTC time, current message, recent dialogue and location warnings. Attachment timestamps must include timezone, be no more than 120 seconds old or 30 seconds in the future, and accuracy must be ≤100 m. Unusable attachments are not supplied as confirmed coordinates to the model/tools. This does not erase coordinates the user explicitly typed in messages/history.
 7. **Delegate:** `supervisor` chooses `pre_trip`, `during_trip` or `local_enquiry` using structured ADK transfers. Specialists share validation/tools. Temperature is zero, but handoffs and argument extraction remain model-dependent. Malformed/null/nonfinite coordinate arguments trigger errors/clarification rather than being trusted. Duplicate identical calls and calls beyond eight callback-counted tool invocations are blocked; runner also limits execution to six model calls and 60 seconds per turn.
-8. **Execute grounded tools:** coordinates must match an accepted attachment, per-turn place evidence, or numeric evidence in the conversation. This is an initial numeric-evidence guard, not semantic proof that a location is correct. Pilot planning additionally requires an explicitly confirmed ISO departure timestamp with timezone in conversation evidence. Missing/ambiguous inputs should lead to fixed clarification questions, not guessed home locations, times or cities.
+8. **Execute grounded tools:** coordinates must match an accepted attachment, per-turn place evidence, or numeric evidence in the conversation. This is an initial numeric-evidence guard, not semantic proof that a location is correct. Pilot planning additionally requires an explicitly confirmed ISO departure timestamp with timezone, from conversation evidence or the validated selected-trip attachment. Missing/ambiguous inputs should lead to fixed clarification questions, not guessed home locations, times or cities.
 9. **Assemble evidence:** tools retain per-turn results; `render_evidence()` builds reply text, place/route records, warnings and action descriptors. Raw model prose is not used for factual answers. If no evidence exists, return a deterministic clarification. Execution failure/timeouts return an unavailable response with nearby-search and 112 guidance. `provider="adk"` describes orchestration, not independently verified prose; SOS uses `deterministic`.
 10. **Render safely:** UI uses `textContent` for provider/model-derived text, not injected HTML. Cards label sources, distance/hour basis, snapshot metadata when present, and warnings. Google place results link to Google Maps rather than being plotted on the OSM map. Route cards summarize distance/time, support score where present and Plan B share; they do not automatically replace the selected map route. Supported call links are allowlisted; calls and external navigation still require user action.
 11. **Keep emergency access independent:** SOS can interrupt the browser's pending fetch; its fixed server response does not wait for an ordinary turn's session lock. The UI has a 70-second request timeout and leaves the 112 link visible. Browser cancellation/closing is not a guarantee that server work stopped immediately.
@@ -343,6 +344,7 @@ sequenceDiagram
 | `search_nearby_places` | Google Places first for pharmacy, police, hospital, toilets, cafe or supermarket; up to three within 2.5 km. If unavailable/empty, use pilot OSM cache with explicit fallback warning, snapshot/attribution, restricted-access exclusion and deduplication. Distances are straight-line, not walking times; places are not guaranteed open or able to assist. |
 | `get_place_details` | Only IDs returned by a search in the same turn. Google Details for Google places; cached OSM records for OSM places. Details are not a verification of current availability. |
 | `estimate_walking_access` | Google Routes in `WALK` mode first; directed local walking graph fallback when both points are within cached coverage. Local duration uses 80 m/min and approximate endpoint connectors, not verified entrances/crossings. Neither estimate has a SafeHer score or live ETA. |
+| `compare_selected_trip` | Reads only the explicit structured trip attachment; reuses validated planning and renders extra minutes, support/lighting scores, confidence and weak-stretch counts. No user-entered coordinates required. |
 | `plan_supported_trip` | Calls existing Python `plan()` with current report inputs, not an LLM route generator. Returns compact route labels, distance/time, scores/breakdown, reasons, weak stretches and Plan B. Full route geometry/pieces are omitted, but compact weak-stretch/Plan B records can still contain location data. Only the two pilots have scored planning. |
 | `get_plan_b_coverage` | Reads a route computed in the same turn; cannot retrieve another user's private live trip. |
 | `ask_clarification` / `get_emergency_actions` | Fixed prompts or India 112 escalation; no fabricated facts, dispatch, calls or automatic sharing. |
@@ -357,7 +359,7 @@ Google tools require `GOOGLE_MAPS_API_KEY`, enabled APIs and billing. HTTPS veri
 - Sharing tokens/latest live GPS are not automatically supplied to chat. Chat's explicit one-shot attachment and continuous foreground sharing have separate consent/lifecycles. No calls, contact notifications or sharing start automatically.
 - Browser chat history/token stay in JavaScript memory, not local/session storage. Closing clears the attachment and pending UI request but retains the in-page conversation. Reload loses local chat state. “Clear this chat” resets browser history/token, **not immediate server deletion**; server context expires independently. Avoid logging chat bodies, credentials, provider URLs/queries or tokens.
 - Multi-turn context exists but is bounded; candidate confirmation, natural-language departure parsing, local-name tool selection and small-model reliability remain incomplete. Fuzzy search tools work independently of whether the model selects them correctly. No unrestricted web Q&A, verified refuge recommendations, nationwide scored routing, emergency dispatch or production authentication/abuse controls.
-- Verified demo question: **“Find the nearest pharmacy to these confirmed coordinates: 28.5433, 77.2067.”** Three consecutive live Ollama runs returned Google Places records; the recorded browser run also succeeded. This is a reproducible smoke-test candidate, not a guarantee of future model/provider output. The [latest video](media/safeher-demo-herside.mp4) includes this real Q&A, model-independent SOS, Plan B and visibly simulated live-sharing GPS.
+- Verified demo question: **“For this walk, is the extra walking time worth it for better lighting and fewer weak stretches?”** The user attaches the selected trip through the UI, not coordinate text. Three consecutive live Ollama checks returned computed route comparisons. The [latest video](media/safeher-demo-herside.mp4) demonstrates this pre-trip trade-off, SOS, Plan B and visibly simulated live-sharing GPS.
 
 ## 7. Other user-facing workflows
 
@@ -434,17 +436,17 @@ Typical planning input:
 - Each route: `label`, `distance_m`, `duration_min`, nullable `score`, `band`, scored `coverage`, signal `breakdown`, `highlights`, `reasons`, `weak_stretches`, `stops`, `geometry`, `pieces`, `plan_b`.
 - `coverage` is scoreable-length coverage; `plan_b.within_threshold_share` is help-access coverage. They are different metrics.
 
-Typical initial chat input (no GPS attachment or previous session needed):
+Typical initial chat input (no previous session; without a location this should ask for clarification):
 
 ```json
 {
-  "message": "Find the nearest pharmacy to these confirmed coordinates: 28.5433, 77.2067.",
+  "message": "Where is the nearest pharmacy?",
   "sos": false,
   "lang": "en"
 }
 ```
 
-For follow-ups pass the returned `session_id` as a secret bearer capability. Optional `location` contains `lat`, `lon`, `accuracy_m`, and timezone-aware `observed_at`; `message` must be 1–2000 characters. Chat output contains `session_id`, `reply`, `intent`, `urgency`, `needs_clarification`, `places`, `routes`, `actions`, `warnings`, `provider`. Action contracts include `call`, `request_location`, `show_place`, `open_directions`; the current UI renders allowed call/location actions and its own place/Google Maps controls, not a general arbitrary action executor. An urgent response does not create/refresh a chat session.
+For follow-ups pass the returned `session_id` as a secret bearer capability. Optional `trip` contains `origin`/`destination` objects (`lat`, `lon`) and timezone-aware `depart_at`. It is only included after explicit UI attachment and is available to the configured model; it does not read live-sharing sessions. Optional `location` contains `lat`, `lon`, `accuracy_m`, and timezone-aware `observed_at`; `message` must be 1–2000 characters. Chat output contains `session_id`, `reply`, `intent`, `urgency`, `needs_clarification`, `places`, `routes`, `actions`, `warnings`, `provider`. Action contracts include `call`, `request_location`, `show_place`, `open_directions`; the current UI renders allowed call/location actions and its own place/Google Maps controls, not a general arbitrary action executor. An urgent response does not create/refresh a chat session.
 
 **Coordinate convention:** planning geometry/piece coordinates are `[latitude, longitude]`. GeoJSON and trip-session route input use `[longitude, latitude]`. Frontend converts between them; do not copy arrays across APIs without checking order.
 
@@ -509,11 +511,11 @@ From `backend/`, with the existing project environment installed:
 
 ### Validation recorded October 16
 
-- Backend/default suite: **215 passed, 7 skipped**. Six skips are the opt-in HerSide browser tests; one is an existing skipped test.
-- HerSide browser suite run separately: **6 passed** (keyboard/Escape/focus, mobile overflow, text-only rendering, actions/errors, explicit one-shot location). Separate execution avoids an observed native macOS subprocess crash after the mixed geospatial/API suite.
+- Backend/default suite: **223 passed, 8 skipped**. Seven skips are the opt-in HerSide browser tests; one is an existing skipped test.
+- HerSide browser suite run separately: **7 passed** (keyboard/Escape/focus, mobile overflow, text-only rendering, actions/errors, explicit one-shot location). Separate execution avoids an observed native macOS subprocess crash after the mixed geospatial/API suite.
 - Live browser: pharmacy query returned three place cards, SOS worked, native modal/Escape worked, and no JavaScript errors were observed.
 - Live tools: Ollama structured calls, ADK delegation, missing-location clarification, Places/Details, walking Routes, pilot planning and SOS passed smoke checks. Local resolver/nearby and forced-outage walking fallbacks were also exercised. These do not establish production reliability.
-- Latest demo: 4:48, real Ollama pharmacy Q&A; MP4 fully decode-validated and visually reviewed. Only the current recorder/video/poster are retained.
+- Latest demo: **4:54**, natural pre-trip trade-off Q&A; MP4 fully decode-validated and visually reviewed, including the readable prose comparison. Only the current recorder/video/poster are retained.
 
 ```bash
 # From backend/: isolated UI tests using installed Chrome
