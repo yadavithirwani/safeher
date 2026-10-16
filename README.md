@@ -14,30 +14,20 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 
 Initial Google ADK supervisor/specialist agents and `POST /api/chat` are implemented, with Ollama configuration, Google Maps tools and a model-independent SOS response. **Live Ollama/ADK/Places smoke checks have passed; model reliability and Geocoding configuration still need work.** Setup, tests and limitations: [backend/CHATBOT_README.md](backend/CHATBOT_README.md). Open **HerSide · Ask for help** above the route cards for nearby-place questions, selected-trip comparisons, one-shot location attachment and SOS call options. Chat context stays in memory, not browser storage; clearing the UI does not immediately delete the expiring server context. Frontend integration is an initial version, not a production emergency service.
 
-## Demo
+## Latest demo · HerSide Q&A + Plan B + live sharing
 
-[![SafeHer demo: Hauz Khas Metro to Select Citywalk, Delhi, at 9:30 PM. Click to play the video.](docs/media/demo-poster.jpg)](docs/media/safeher-demo.mp4)
+[![SafeHer with HerSide chatbot, live Google Places results and route support.](docs/media/safeher-demo-herside-poster.jpg)](docs/media/safeher-demo-herside.mp4)
 
-▶️ **[Watch the 2½-minute demo video](docs/media/safeher-demo.mp4)** (MP4, 8.5 MB, captioned). It shows:
-- Night-time route comparison in Delhi: the best-supported route is 1 min longer and scores 77 vs 67
-- Weak stretches, safe stops and the per-signal breakdown
-- Scores changing with time of day (1 PM vs 11:45 PM)
-- Nearest police and washrooms, and how the score is calculated
-- Bengaluru's street lamps on the night map, reporting and SOS
+**[Watch the latest captioned demo](docs/media/safeher-demo-herside.mp4)** — 4:48, 1440×900, approximately 39 MB. It covers:
+- Delhi walking-route comparison, transparent signals and changing departure times
+- Plan B estimates, coverage gaps and uncertainty
+- Opt-in live sharing, recipient view, simulated movement and revoking the link
+- **HerSide Q&A powered by local Ollama**: a real pharmacy search with source-labelled Google Places results
+- Model-independent SOS and explicit, one-shot chatbot location consent
 
-## Updated demo · live location sharing
+The pharmacy question includes explicit demo coordinates; chatbot replies and API results are not mocked. Sharing GPS is simulated and labelled. The recording uses a labelled cached OSM map. Only the latest recorder, video and poster are kept; earlier versions remain in Git history.
 
-[![Updated SafeHer demo with live location sharing.](docs/media/safeher-demo-live-sharing-poster.jpg)](docs/media/safeher-demo-live-sharing.mp4)
-
-▶ **[Watch the updated demo](docs/media/safeher-demo-live-sharing.mp4)** — the original walkthrough plus a new live-sharing chapter: opt-in GPS sharing, recipient map, simulated movement, accuracy/update age, foreground limitations, and stopping/revoking the link. The new chapter is labelled **simulated GPS / cached OSM map**. The original video and poster above remain unchanged.
-
-Recording instructions: [demo/README.md](demo/README.md). The new recorder never overwrites either version.
-
-## Latest demo · Plan B Coverage + live sharing
-
-[![SafeHer demo featuring Plan B Coverage and live location sharing.](docs/media/safeher-demo-plan-b-and-live-sharing-poster.jpg)](docs/media/safeher-demo-plan-b-and-live-sharing.mp4)
-
-**[Watch the latest demo](docs/media/safeher-demo-plan-b-and-live-sharing.mp4)** — the previous walkthrough and live-sharing chapter, followed by Plan B route comparisons, departure-time changes, coverage-gap highlighting, and least-covered-point focus. The new chapter uses real API calculations and a labelled cached OSM map. Both previous videos remain unchanged.
+Recording instructions: [demo/README.md](demo/README.md).
 
 ## Plan B Coverage
 
@@ -76,7 +66,7 @@ Open http://localhost:8765.
 Route explanations use **Gemini** when `GEMINI_API_KEY=...` is set in `backend/.env` (free key from [Google AI Studio](https://aistudio.google.com/apikey); never commit it). Without a key, a fact-checked template is used. Map data for both demo areas is already in `data/areas/`; rebuild it with `../.venv/bin/python -m safeher.fetch`. Run the tests with `../.venv/bin/pytest`.
 
 ### Record the demo video
-With the server running from `backend/`: `../.venv/bin/python -m playwright install chromium` (once), then `../.venv/bin/python ../demo/record_demo.py` → `demo/out/safeher-demo.mp4` (≈2½ min, captioned). Add `--headed` to watch it record.
+With SafeHer and Ollama running, from the repository root: `.venv/bin/python demo/record_demo.py --base http://localhost:8767` → `docs/media/safeher-demo-herside.mp4`. Requires Chrome, ffmpeg and cached MapLibre assets; see [demo/README.md](demo/README.md). Add `--headed` to watch.
 
 ## Live location sharing (foreground MVP)
 

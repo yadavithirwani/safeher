@@ -295,7 +295,7 @@ From `backend/`, with the existing project environment installed:
 
 - App: http://localhost:8765
 - API schemas: http://localhost:8765/docs
-- Latest video: [Plan B + live sharing demo](media/safeher-demo-plan-b-and-live-sharing.mp4)
+- Latest video: [HerSide Q&A + Plan B + live sharing demo](media/safeher-demo-herside.mp4)
 - Regression suite: `cd backend && ../.venv/bin/python -m pytest -q`
 
 Last recorded feature-validation result: **168 passed, 1 skipped**, plus browser interaction checks for sharing and Plan B. This is historical verification, not a guarantee that every future checkout has been tested. See [README.md](../README.md) for installation and provider configuration.
