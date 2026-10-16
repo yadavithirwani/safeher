@@ -10,7 +10,7 @@ from functools import lru_cache
 import networkx as nx
 
 from . import config
-from .areas import AREAS, Area
+from .areas import AREAS, Area, get_area
 from .geo import LatLon, haversine_m
 from .viirs import ViirsGrid, load_for as load_viirs
 from .pois import SAFE_SPACE_KINDS, STOP_KINDS, TRANSIT_KINDS, Poi, PointIndex, pois_from_osm
@@ -65,11 +65,11 @@ def _parse_listish(value):
     return value
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=12)
 def load_area(area_id: str) -> AreaData:
     import osmnx as ox
 
-    area = AREAS[area_id]
+    area = get_area(area_id)
     graph_path = area.dir / "walk.graphml"
     if not graph_path.exists():
         raise FileNotFoundError(f"{area_id} not cached; run: python -m safeher.fetch {area_id}")

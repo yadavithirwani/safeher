@@ -280,11 +280,11 @@ def test_search_adds_google_predictions_after_local_results(google_on):
     assert "lat" not in g[0]  # coordinates only come from Place Details when chosen
 
 
-def test_place_outside_demo_areas_is_refused(google_on):
+def test_place_anywhere_is_returned_with_its_area_if_known(google_on):
     c = google_on(FakeGoogle())
     assert c.get("/api/google/place/ChIJ_test_place_DEL").json()["area"] == DEL.id
     r = c.get("/api/google/place/ChIJ_test_place_MUM")
-    assert r.status_code == 422 and "outside the demo areas" in r.json()["detail"]
+    assert r.status_code == 200 and r.json()["area"] is None  # go-anywhere: Mumbai is fine, just no demo area
 
 
 def test_tiles_and_images_are_proxied_without_caching(google_on):

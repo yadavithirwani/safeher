@@ -9,7 +9,7 @@ from datetime import datetime
 from . import config, ncrb
 from .backup import BackupCoverage
 from . import signals as sig
-from .areas import Area, area_for
+from .areas import Area, area_covering
 from .geo import LatLon, haversine_m, interpolate, polyline_distance_m, split_polyline
 from .pois import Poi, PointIndex
 from .routing import AreaData, Edge, candidate_paths, edge_between, load_area, path_edges
@@ -324,9 +324,9 @@ def plan(origin: LatLon, dest: LatLon, when: datetime, reports: list[tuple[LatLo
     """
     if when.tzinfo is None:
         raise ValueError("departure time must be timezone-aware")
-    area: Area | None = area_for(*origin)
-    if area is None or not area.contains(*dest):
-        raise ValueError("origin and destination must both be inside one demo area")
+    area: Area | None = area_covering(origin, dest)
+    if area is None:
+        raise ValueError("origin and destination must both be inside one area with street data")
     data = load_area(area.id)
     night = night_fraction(when, *area.center)
     ctx = TripContext(data, when, night, weights_at(night), PointIndex(reports))

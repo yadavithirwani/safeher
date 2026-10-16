@@ -90,7 +90,7 @@ def fetch_graph(area: Area):
     raise RuntimeError(f"could not download walk graph: {last_error}")
 
 
-def save_area(area: Area) -> dict:
+def save_area(area: Area, write_meta: bool = True) -> dict:
     import osmnx as ox
 
     area.dir.mkdir(parents=True, exist_ok=True)
@@ -106,5 +106,6 @@ def save_area(area: Area) -> dict:
         "pois": len(pois),
         "source": "© OpenStreetMap contributors, ODbL",
     }
-    (area.dir / "meta.json").write_text(json.dumps(meta, indent=2))
+    if write_meta:  # meta.json marks an area complete; trip downloads write it after checks pass
+        (area.dir / "meta.json").write_text(json.dumps(meta, indent=2))
     return meta

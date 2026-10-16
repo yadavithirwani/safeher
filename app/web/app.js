@@ -246,7 +246,7 @@ function setupSearch(inputSel, listSel, which) {
         r = { ...r, lat: p.lat, lon: p.lon, area: p.area };
       } catch (err) { toast(err.message); return; } finally { session = null; }
     }
-    if (r.area && r.area !== state.area.id) switchArea(r.area, false, false); // other city: start fresh there
+    if (r.area && r.area !== state.area.id && state.areas.some((a) => a.id === r.area)) useArea(r.area);
     setPoint(which, { name: r.name, lat: r.lat, lon: r.lon });
     planTrip(true);
   };
@@ -256,7 +256,9 @@ function setupSearch(inputSel, listSel, which) {
     if (!q) { items = landmarkItems(); active = -1; empty = ""; return render(); }
     if (googleOn("autocomplete") && !session) session = crypto.randomUUID?.() || String(Date.now());
     const s = googleOn("autocomplete") ? `&session=${session}` : "";
-    try { items = await api(`/api/search?q=${encodeURIComponent(q)}&area=${state.area.id}${s}`); } catch { items = []; }
+    const c = map ? map.getCenter() : null;
+    const near = c ? `&lat=${c.lat.toFixed(5)}&lon=${c.lng.toFixed(5)}` : "";
+    try { items = await api(`/api/search?q=${encodeURIComponent(q)}&area=${state.area.id}${s}${near}`); } catch { items = []; }
     empty = items.length ? "" : q;
     active = items.length ? 0 : -1; render();
   }, 120);
@@ -275,6 +277,44 @@ function setupSearch(inputSel, listSel, which) {
 }
 
 /* ---------- planning ---------- */
+/* ---------- go anywhere: first trip in a new place downloads its street data ---------- */
+function showPreparing(resp, seq, fit) {
+  state.plan = null;
+  const job = resp.job;
+  if (!state.prepStarted || state.prepArea !== job.area) { state.prepStarted = Date.now(); state.prepArea = job.area; }
+  // Google's route straight away (unscored), so there's something to look at.
+  if (map.getSource("alt-routes")) {
+    const line = (coords) => ({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords.map(([a, b]) => [b, a]) } });
+    map.getSource("alt-routes").setData({ type: "FeatureCollection", features: (resp.preview || []).map((r) => line(r.geometry)) });
+    ["pieces", "weak"].forEach((id) => map.getSource(id).setData({ type: "FeatureCollection", features: [] }));
+    clearMarkers("labels"); clearMarkers("pois");
+    const pts = (resp.preview || []).flatMap((r) => r.geometry);
+    if (fit) fitTo(pts.length ? pts : [[state.origin.lat, state.origin.lon], [state.dest.lat, state.dest.lon]]);
+  }
+  const secs = Math.round((Date.now() - state.prepStarted) / 1000);
+  const failed = job.state === "failed";
+  $("#view").innerHTML = `<section class="prep-card${failed ? " failed" : ""}">
+      <div class="prep-head">${failed ? icon("error") : '<span class="spinner" aria-hidden="true"></span>'}
+        <b>${failed ? "Couldn’t get street data here" : "First trip here: getting street data"}</b></div>
+      <p>${esc(job.message)}</p>
+      ${failed ? "" : `<p class="muted small">SafeHer is downloading streets, lighting and open places for this area from OpenStreetMap so it can score routes. This happens once per area and usually takes 1–5 minutes${secs > 5 ? ` · ${secs}s so far` : ""}.</p>`}
+      ${(resp.preview || []).map((r) => `<div class="prep-preview">${icon("map")}<span><b>${esc(r.label)}</b> · ${fmtDist(r.distance_m)} · ${fmtDur(r.duration_min)}</span><span class="badge band-none">Not scored yet</span></div>`).join("")}
+      ${failed ? `<button class="btn" id="prepRetry">${icon("refresh")}Try again</button>` : ""}
+    </section>`;
+  $("#prepRetry")?.addEventListener("click", () => { state.prepStarted = null; planTrip(true); });
+  if (failed) return;
+  clearTimeout(state.prepTimer);
+  state.prepTimer = setTimeout(async () => {
+    if (seq !== state.planSeq) return; // the user changed the trip meanwhile
+    try {
+      const st = await api(`/api/prepare/${job.area}`);
+      if (seq !== state.planSeq) return;
+      if (st.state === "ready") { state.prepStarted = null; planTrip(true); }
+      else showPreparing({ ...resp, job: st }, seq, false);
+    } catch { showPreparing(resp, seq, false); }
+  }, resp.poll_ms || 2000);
+}
+
 async function planTrip(fit = false) {
   if (!state.origin || !state.dest) return;
   state.mode = "routes"; setChip(null); clearMarkers("pois"); hideBanner();
@@ -285,8 +325,10 @@ async function planTrip(fit = false) {
       origin: { lat: state.origin.lat, lon: state.origin.lon },
       destination: { lat: state.dest.lat, lon: state.dest.lon },
       depart_at: departIso(),
+      trip_name: `${state.origin.name} → ${state.dest.name}`.slice(0, 160),
     }) });
     if (seq !== state.planSeq) return; // a newer request superseded this one
+    if (plan.status === "preparing") return showPreparing(plan, seq, fit);
     const keepLabel = state.plan?.routes[state.selected]?.label;
     state.plan = plan;
     const again = plan.routes.findIndex((r) => r.label === keepLabel);
@@ -746,6 +788,12 @@ function renderAreaSwitch() {
   $("#areaSwitch").innerHTML = state.areas.map((a) =>
     `<button role="tab" data-id="${a.id}" aria-selected="${a.id === state.area.id}">${esc(a.city === "Bengaluru" ? "Bengaluru" : a.city)}</button>`).join("");
   $("#areaSwitch").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => switchArea(b.dataset.id)));
+}
+
+/* Make a configured area current (city switcher, overlays) without touching the trip. */
+function useArea(id) {
+  state.area = state.areas.find((a) => a.id === id) || state.area;
+  renderAreaSwitch(); loadOverlays(); loadReports();
 }
 
 function switchArea(id, keepPoints = false, plan = true) {

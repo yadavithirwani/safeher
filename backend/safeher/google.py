@@ -153,13 +153,22 @@ class GoogleClient:
 
     # ---- Places API (New) -----------------------------------------------------------------
 
-    def autocomplete(self, text: str, bbox: tuple[float, float, float, float], session_token: str | None = None
-                     ) -> list[dict]:
-        """bbox = (south, west, north, east). Returns [{place_id, main, secondary}]."""
-        south, west, north, east = bbox
-        body = {"input": text, "includedRegionCodes": [_G["region"].lower()], "languageCode": _G["language"],
-                "locationRestriction": {"rectangle": {"low": {"latitude": south, "longitude": west},
-                                                      "high": {"latitude": north, "longitude": east}}}}
+    def autocomplete(self, text: str, bbox: tuple[float, float, float, float] | None = None,
+                     session_token: str | None = None, near: tuple[float, float] | None = None,
+                     radius_m: float = 30000) -> list[dict]:
+        """Returns [{place_id, main, secondary}].
+
+        bbox = (south, west, north, east) restricts results to that rectangle (demo areas). Without
+        it, results are only *biased* towards `near` within `radius_m`, so any place can be found.
+        """
+        body = {"input": text, "includedRegionCodes": [_G["region"].lower()], "languageCode": _G["language"]}
+        if bbox is not None:
+            south, west, north, east = bbox
+            body["locationRestriction"] = {"rectangle": {"low": {"latitude": south, "longitude": west},
+                                                         "high": {"latitude": north, "longitude": east}}}
+        elif near is not None:
+            body["locationBias"] = {"circle": {"center": {"latitude": near[0], "longitude": near[1]},
+                                               "radius": float(min(radius_m, 50000))}}
         if session_token:
             body["sessionToken"] = session_token
         data = self._call("POST", f"{PLACES}/places:autocomplete", json=body).json()

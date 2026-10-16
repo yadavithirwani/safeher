@@ -13,23 +13,24 @@ import threading
 import time
 from collections import OrderedDict
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi import Path as PathParam
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import trips
 from . import signals as sig
-from . import config, google
-from .areas import AREAS, area_for
+from . import config, google, prepare
+from .areas import AREAS, area_for, get_area, timezone_at
 from .config import REPO_ROOT
 from .geo import LatLon, haversine_m
 from .explain import LANGUAGES, explain
-from .plan import DISCLAIMER, KIND_LABELS, plan
+from .plan import DISCLAIMER, KIND_LABELS, WALK_M_PER_MIN, plan
 from .pois import SAFE_SPACE_KINDS
 from .routing import load_area
 from .search import search as place_search
@@ -40,6 +41,7 @@ REPORTS_FILE = Path(__file__).resolve().parents[1] / "var" / "reports.jsonl"
 
 APP = config.app()
 GOOGLE = APP["google"]
+ANYWHERE = APP["anywhere"]
 
 
 def g_on(feature: str) -> bool:
@@ -164,7 +166,8 @@ class Point(BaseModel):
 class PlanRequest(BaseModel):
     origin: Point
     destination: Point
-    depart_at: datetime | None = None  # ISO 8601; naive = local time in the area; omitted = now
+    depart_at: datetime | None = None  # ISO 8601; naive = local time at the origin; omitted = now
+    trip_name: str | None = Field(default=None, max_length=160)  # names a newly downloaded trip area
 
 
 class ExplainRequest(PlanRequest):
@@ -209,12 +212,14 @@ def meta():
         "disclaimer": DISCLAIMER,
         "google": {f: g_on(f) for f in GOOGLE["features"]},
         "google_autocomplete_min_chars": GOOGLE["autocomplete_min_chars"],
+        "anywhere": {k: ANYWHERE[k] for k in ("enabled", "max_trip_km", "poll_interval_ms")},
     }
 
 
 @app.get("/api/search")
 def search(q: str = Query(min_length=1, max_length=80), area: str | None = None,
-           limit: int = APP["search"]["default_limit"], session: str | None = Query(default=None, max_length=64)):
+           limit: int = APP["search"]["default_limit"], session: str | None = Query(default=None, max_length=64),
+           lat: float | None = Query(default=None, ge=-90, le=90), lon: float | None = Query(default=None, ge=-180, le=180)):
     """Places, streets and landmarks. With `area`, searches it first; if nothing matches there,
     results from the other demo areas come back flagged `other_area` so the app can offer a switch."""
     if area and area not in AREAS:
@@ -223,10 +228,14 @@ def search(q: str = Query(min_length=1, max_length=80), area: str | None = None,
     results = place_search(q, first, limit)
     if not results and area:
         results = [{**r, "other_area": True} for r in place_search(q, [a for a in AREAS if a != area], limit)]
-    if area and g_on("autocomplete") and len(q.strip()) >= GOOGLE["autocomplete_min_chars"]:
-        a = AREAS[area]
+    if g_on("autocomplete") and len(q.strip()) >= GOOGLE["autocomplete_min_chars"]:
+        a = AREAS.get(area) if area else None
+        near = (lat, lon) if lat is not None and lon is not None else (a.center if a else None)
+        # Go-anywhere: bias towards where the user is looking; otherwise stay inside the demo area.
+        bbox = None if ANYWHERE["enabled"] else ((a.south, a.west, a.north, a.east) if a else None)
         try:
-            preds = google.client().autocomplete(q.strip(), (a.south, a.west, a.north, a.east), _session(session))
+            preds = google.client().autocomplete(q.strip(), bbox, _session(session), near=near,
+                                                 radius_m=float(ANYWHERE["google_search_bias_km"]) * 1000)
         except google.GoogleError as e:
             logging.warning("Google autocomplete failed, showing local results only: %s", e)
             preds = []
@@ -235,19 +244,17 @@ def search(q: str = Query(min_length=1, max_length=80), area: str | None = None,
             if pr["main"].lower() in local_names:
                 continue
             results.append({"name": pr["main"], "kind": "google", "place_id": pr["place_id"], "source": "google",
-                            "detail": " · ".join(x for x in (pr["secondary"], "Google") if x), "area": area,
-                            "city": a.city})
+                            "detail": " · ".join(x for x in (pr["secondary"], "Google") if x)})
     return results[: limit + 5]
 
 
 def _parse_departure(depart_at: datetime | None, p: LatLon) -> datetime:
     area = area_for(*p)
-    if area is None:
-        raise HTTPException(422, f"This location is outside the demo areas: {_area_list()}.")
+    tz = area.tz if area else ZoneInfo(timezone_at(*p))
     now = datetime.now(timezone.utc)
     if depart_at is None:
-        return now.astimezone(area.tz)
-    when = depart_at if depart_at.tzinfo else depart_at.replace(tzinfo=area.tz)
+        return now.astimezone(tz)
+    when = depart_at if depart_at.tzinfo else depart_at.replace(tzinfo=tz)
     if abs((when - now).total_seconds()) > DEPARTURE_WINDOW_S:
         raise HTTPException(422, f"Departure time must be within {APP['departure_window_days']} days of today.")
     return when
@@ -257,10 +264,35 @@ def _parse_departure(depart_at: datetime | None, p: LatLon) -> datetime:
 def plan_trip(req: PlanRequest):
     o, d = (req.origin.lat, req.origin.lon), (req.destination.lat, req.destination.lon)
     when = _parse_departure(req.depart_at, o)
+    if ANYWHERE["enabled"]:
+        try:
+            area, job = prepare.ensure(o, d, req.trip_name)
+        except prepare.TooFar as e:
+            raise HTTPException(422, str(e)) from e
+        if area is None:  # first trip here: street data is downloading
+            return JSONResponse(status_code=202, content={
+                "status": "preparing", "job": job, "poll_ms": ANYWHERE["poll_interval_ms"],
+                "preview": _google_preview(o, d), "google_map": g_on("map_tiles")})
     try:
         return _planned(o, d, when)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+
+
+@app.get("/api/prepare/{area_id}")
+def prepare_status(area_id: str = PathParam(pattern=r"^trip-[0-9a-f]{10}$")):
+    return prepare.status(area_id)
+
+
+def _google_preview(o: LatLon, d: LatLon) -> list[dict]:
+    """Google's walking route, shown (unscored) while street data downloads. Google map only."""
+    external, _ = _google_routes(o, d)
+    out = []
+    for r in external:
+        dist = sum(haversine_m(a, b) for a, b in zip(r["points"], r["points"][1:]))
+        out.append({"label": r["label"], "distance_m": round(dist), "duration_min": round(round(dist) / WALK_M_PER_MIN),
+                    "geometry": [[round(a, 6), round(b, 6)] for a, b in r["points"]]})
+    return out
 
 
 _route_cache: "OrderedDict[tuple, list]" = OrderedDict()
@@ -296,7 +328,7 @@ def _area_place_names(area_id: str) -> set[str]:
     """Every named place in the area: an explanation may only name the ones in its own facts."""
     if area_id not in _place_names:
         names = {p.name for p in load_area(area_id).pois if p.name}
-        names |= {lm.name for lm in AREAS[area_id].landmarks}
+        names |= {lm.name for lm in get_area(area_id).landmarks}
         _place_names[area_id] = names
     return _place_names[area_id]
 
@@ -311,7 +343,7 @@ def explain_trip(req: ExplainRequest):
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     # Landmarks at the start or end of the trip may be named; any other place not in the facts may not.
-    at_endpoints = {lm.name for lm in AREAS[p["area"]["id"]].landmarks
+    at_endpoints = {lm.name for lm in get_area(p["area"]["id"]).landmarks
                     if min(haversine_m((lm.lat, lm.lon), o), haversine_m((lm.lat, lm.lon), d)) < ENDPOINT_LANDMARK_M}
     result = explain(p, req.lang, forbidden_names=_area_place_names(p["area"]["id"]) - at_endpoints)
     return {k: result[k] for k in ("text", "provider", "model", "lang", "checked")}
@@ -321,17 +353,24 @@ NearbyKind = Literal["police", "toilets", "hospital", "pharmacy", "open_places"]
 
 
 @app.get("/api/nearby")
-def nearby(lat: float, lon: float, kind: NearbyKind, depart_at: datetime | None = None,
+def nearby(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180), kind: NearbyKind = Query(),
+           depart_at: datetime | None = None,
            limit: int = APP["nearby"]["default_limit"]):
     when = _parse_departure(depart_at, (lat, lon))
-    data = load_area(area_for(lat, lon).id)
-    local = when.astimezone(data.area.tz)
-    if g_on("nearby") and abs((when - datetime.now(timezone.utc)).total_seconds()) < 1800:
-        # Google's "open now" is live, so it's only used for trips leaving about now.
+    area = area_for(lat, lon)
+    live = abs((when - datetime.now(timezone.utc)).total_seconds()) < 1800
+    if g_on("nearby") and (live or area is None):
+        # Google's "open now" is live: used for trips leaving about now, or wherever SafeHer has no data.
         try:
-            return _google_nearby(lat, lon, kind, local, limit, data)
+            local = when.astimezone(area.tz if area else ZoneInfo(timezone_at(lat, lon)))
+            return _google_nearby(lat, lon, kind, local, limit, area, live)
         except google.GoogleError:
-            pass  # fall back to OpenStreetMap below
+            if area is None:
+                raise HTTPException(502, "Nearby places are unavailable here right now.")
+    if area is None:
+        raise HTTPException(422, "SafeHer has no street data here yet. Plan a trip here first.")
+    data = load_area(area.id)
+    local = when.astimezone(data.area.tz)
     index = data.safe_spaces if kind == "open_places" else data.stops
     out = []
     for dist, poi in index.within((lat, lon), NEARBY_RADIUS_M):
@@ -355,13 +394,15 @@ def nearby(lat: float, lon: float, kind: NearbyKind, depart_at: datetime | None 
     return {"kind": kind, "at": local.isoformat(timespec="minutes"), "source": "openstreetmap", "results": out}
 
 
-def _google_nearby(lat, lon, kind, local, limit, data):
+def _google_nearby(lat, lon, kind, local, limit, area, live=True):
     places = google.client().nearby(lat, lon, GOOGLE["nearby_types"][kind], NEARBY_RADIUS_M, limit * 2)
     out = []
     wanted = set(GOOGLE["nearby_types"][kind])
     for g in places:
-        if not data.area.contains(g["lat"], g["lon"]):
+        if area is not None and not area.contains(g["lat"], g["lon"]):
             continue
+        if not live:
+            g = {**g, "open": None}  # Google only knows "open now", not open at another time
         if g["type"] not in wanted:  # e.g. a community centre that merely sits in a "police colony"
             continue
         if kind == "open_places" and g["open"] is not True:
@@ -431,9 +472,9 @@ def google_place(place_id: str = PathParam(pattern=r"^[A-Za-z0-9_-]{10,300}$"),
             raise HTTPException(404, "Place not found.") from e
         raise HTTPException(502, f"Google place lookup failed: {e}") from e
     a = area_for(p["lat"], p["lon"])
-    if a is None:
+    if a is None and not ANYWHERE["enabled"]:
         raise HTTPException(422, f"{p['name'] or 'That place'} is outside the demo areas: {_area_list()}.")
-    return {**p, "area": a.id, "city": a.city}
+    return {**p, "area": a.id if a and a.id in AREAS else None, "city": a.city if a else None}
 
 
 @app.get("/api/google/streetview/available")

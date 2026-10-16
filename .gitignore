@@ -45,3 +45,6 @@ demo/out/
 # Hypothesis example database
 .hypothesis/
 backend/.hypothesis/
+
+# Trip areas downloaded on demand (local cache)
+data/areas/trip-*/

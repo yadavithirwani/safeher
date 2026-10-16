@@ -35,9 +35,15 @@ def test_plan_returns_routes_with_pieces(client):
         assert any(p["coords"][0] == w["start"] for p in route["pieces"])
 
 
-def test_plan_outside_demo_areas_is_422(client):
+def test_plan_outside_demo_areas_starts_preparing(client):
+    """Go-anywhere: a trip outside the configured areas starts a street-data download (stubbed in tests)."""
     r = client.post("/api/plan", json={"origin": {"lat": 19.07, "lon": 72.87}, "destination": {"lat": 19.08, "lon": 72.88}})
-    assert r.status_code == 422 and "demo areas" in r.json()["detail"]
+    assert r.status_code == 202 and r.json()["status"] == "preparing" and r.json()["job"]["area"].startswith("trip-")
+
+
+def test_plan_too_far_to_walk_is_422(client):
+    r = client.post("/api/plan", json={"origin": {"lat": 19.07, "lon": 72.87}, "destination": {"lat": 19.20, "lon": 72.95}})
+    assert r.status_code == 422 and "plans walks up to" in r.json()["detail"]
 
 
 def test_search_finds_landmarks_first(client):

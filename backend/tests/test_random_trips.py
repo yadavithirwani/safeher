@@ -166,8 +166,8 @@ BLR = (12.9784, 77.6408)
 
 
 @pytest.mark.parametrize("name, method, path, payload, status, detail", [
-    ("origin outside demo areas", "post", "/api/plan", body((19.07, 72.87), DEL, "21:30"), 422, "demo areas"),
-    ("trip across two cities", "post", "/api/plan", body(DEL, BLR, "21:30"), 422, "one demo area"),
+    ("origin too far from destination", "post", "/api/plan", body((19.07, 72.87), DEL, "21:30"), 422, "plans walks up to"),
+    ("trip across two cities", "post", "/api/plan", body(DEL, BLR, "21:30"), 422, "plans walks up to"),
     ("same start and end", "post", "/api/plan", body(DEL, DEL, "21:30"), 422, "same place"),
     ("latitude out of range", "post", "/api/plan", body((999, 77.2), DEL, "21:30"), 422, None),
     ("missing destination", "post", "/api/plan", {"origin": {"lat": DEL[0], "lon": DEL[1]}}, 422, None),

@@ -354,6 +354,12 @@ Rebuild with `python -m safeher.fetch` (from `backend/`). Snapshots are committe
 
 **Live-sharing storage:** stays SQLite (transactional, many small writes). WAL for multi-worker reads, in-process write lock, and a WAL checkpoint + truncate after any deletion so a stopped/expired location leaves no bytes on disk (tested with a second worker connection open). **DuckDB** was considered and suits the planned analytics dashboard (§5.8), not this store: it allows only one read-write process per database file.
 
+### 8.10 Go anywhere (implemented 16 Oct 2026: `backend/safeher/prepare.py`)
+- Trips outside the configured areas are allowed up to `anywhere.max_trip_km` (8 km straight line). The first plan for a new place downloads OpenStreetMap data for the trip's **corridor** (both points + 1.2 km, rounded so nearby trips share it) into `data/areas/trip-<hash>/` (gitignored), checks it (≥ 30 street points, ≥ 90% connected), then plans normally. Later trips inside it are instant.
+- While downloading, `/api/plan` returns **202** with the job status and **Google's walking route as an unscored preview** (Google map only). The app shows a progress card and polls `/api/prepare/{id}`. Failures are reported with a retry button; failed downloads aren't retried for 60 s.
+- One download per corridor across workers (file lock); status on disk so any worker can answer; departures use the location's own timezone (`timezonefinder`); search is Google-biased to the map centre instead of restricted to demo areas; nearby works anywhere via Google.
+- **Measured problem:** public Overpass servers took 343 s for a small Mumbai corridor and over 10 minutes (stalled) for Toit → Koramangala (7.4 × 4.2 km). On-demand downloads are too slow for a demo → plan: pre-load full Delhi and Bengaluru from Geofabrik extracts and cut corridors locally.
+
 ## 9. Architecture (Google stack)
 
 ```
@@ -479,3 +485,5 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 16 Oct 2026 | Tests never call real Google by default | No cost, no network dependence, reproducible results |
 | 16 Oct 2026 | Search ignores apostrophes; Google session tokens validated (URL-safe base64 ≤ 36) and Google errors logged, never silently dropped | Real query "bobs bar" returned nothing: apostrophe mismatch locally and a rejected token hidden by a silent fallback |
 | 16 Oct 2026 | OpenStreetMap stays as the street network and scoring data; Google adds search, live hours, basemap and route comparison | Google provides no lighting, lamps or walkable street graph, and its terms forbid storing its data to build our own scores |
+| 16 Oct 2026 | Go anywhere: corridor downloads on first use + Google preview meanwhile (§8.10) | User: "go anywhere, not just demo areas"; Google can route but can't supply scoring data |
+| 16 Oct 2026 | Tests never download street data (trip areas go to a temp folder, download stubbed) | A test downloaded a real Mumbai corridor during the run |
