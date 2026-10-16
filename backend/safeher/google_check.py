@@ -73,7 +73,7 @@ def main() -> int:
     if not gemini_key:
         print("GEMINI_API_KEY is not set in backend/.env — Gemini check skipped (template explanations are used).")
     else:
-        model = _env("GEMINI_MODEL", "gemini-2.5-flash")
+        model = _env("GEMINI_MODEL", config.app()["gemini"]["model"])
 
         def models():
             r = httpx.get("https://generativelanguage.googleapis.com/v1beta/models", timeout=15,
@@ -98,7 +98,13 @@ def main() -> int:
         print(f"{'✓' if ok else '✗'} {f'{api_name} · {what}':<{width}}  {detail}")
     failed = sorted({a for a, _, ok, _ in results if not ok})
     for a in failed:
-        print(f"  → {a}: {ENABLE_HINT[a]}")
+        reasons = " ".join(d for api_name, _, ok, d in results if api_name == a and not ok)
+        if "API key not valid" in reasons or "PERMISSION_DENIED" in reasons or "not set" in reasons:
+            print(f"  → {a}: {ENABLE_HINT[a]}")
+        elif "503" in reasons or "429" in reasons:
+            print(f"  → {a}: busy or over quota right now; the app falls back automatically. Try again later.")
+        else:
+            print(f"  → {a}: see the error above (model names change: update config/app.json if needed)")
     if results and not failed:
         print("\nAll Google features are live. Restart the server to use them.")
     return 1 if failed else 0

@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -192,24 +193,44 @@ def build_prompt(facts: dict, lang: str) -> tuple[str, str]:
 
 
 class ProviderUnavailable(Exception):
-    pass
+    """A configured provider failed (bad key, model gone, network, busy after retries)."""
 
 
-def gemini_generate(system: str, user: str, timeout: float = 20.0) -> tuple[str, str]:
+class NotConfigured(ProviderUnavailable):
+    """The provider has no key: the feature is off, which is not an error."""
+
+
+class ExplainFailed(Exception):
+    """A configured provider couldn't produce a checked explanation. Surfaced to the user, never hidden."""
+
+
+GEMINI = config.app()["gemini"]
+
+
+def gemini_generate(system: str, user: str, timeout: float | None = None) -> tuple[str, str]:
     key = _env("GEMINI_API_KEY")
     if not key:
-        raise ProviderUnavailable("GEMINI_API_KEY not set")
-    model = _env("GEMINI_MODEL", "gemini-2.5-flash")
+        raise NotConfigured("GEMINI_API_KEY not set")
+    model = _env("GEMINI_MODEL", GEMINI["model"])
+    timeout = float(GEMINI["timeout_s"]) if timeout is None else timeout
+    gen = {"temperature": GEMINI["temperature"], "maxOutputTokens": GEMINI["max_output_tokens"]}
+    if GEMINI.get("thinking_level"):
+        # Newer Flash models "think" first; unlimited, that can use the whole output allowance (empty answer).
+        gen["thinkingConfig"] = {"thinkingLevel": GEMINI["thinking_level"]}
     body = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 400},
+        "generationConfig": gen,
     }
-    try:
-        r = httpx.post(GEMINI_URL.format(model=model), json=body, timeout=timeout,
-                       headers={"x-goog-api-key": key})
-    except httpx.HTTPError as e:
-        raise ProviderUnavailable(f"Gemini unreachable: {e}") from e
+    for attempt in range(int(GEMINI["busy_retries"]) + 1):
+        try:
+            r = httpx.post(GEMINI_URL.format(model=model), json=body, timeout=timeout,
+                           headers={"x-goog-api-key": key})
+        except httpx.HTTPError as e:
+            raise ProviderUnavailable(f"Gemini unreachable: {e}") from e
+        if r.status_code not in (429, 503):
+            break
+        time.sleep(float(GEMINI["busy_retry_pause_s"]) * (attempt + 1))  # busy / over quota: brief pause, retry
     if r.status_code != 200:
         raise ProviderUnavailable(f"Gemini HTTP {r.status_code}: {r.text[:200]}")
     parts = r.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
@@ -322,12 +343,17 @@ def explain(plan: dict, lang: str = "en", forbidden_names: set[str] = frozenset(
     result = None
     for name in order:
         prompt = user
+        configured = True
         for attempt in range(2):
             try:
                 text, model = providers[name](system, prompt)
-            except ProviderUnavailable as e:
+            except NotConfigured as e:
                 attempts.append({"provider": name, "error": str(e)})
+                configured = False
                 break
+            except ProviderUnavailable as e:
+                # No silent fallback: a configured provider that fails is an error the user sees.
+                raise ExplainFailed(f"{name.capitalize()} failed: {e}") from e
             verdict = check(text, facts, lang, forbidden_names)
             attempts.append({"provider": name, "ok": verdict.ok, "problems": verdict.problems})
             if verdict.ok:
@@ -337,7 +363,10 @@ def explain(plan: dict, lang: str = "en", forbidden_names: set[str] = frozenset(
                       + ". Rewrite it following every rule.")
         if result:
             break
-    if result is None:
+        if configured:
+            raise ExplainFailed(f"{name.capitalize()}'s answer failed the fact checks twice: "
+                                + "; ".join(attempts[-1]["problems"]))
+    if result is None:  # no provider configured: the route-data summary is the feature, not a fallback
         text = template_explanation(facts, lang)
         verdict = check(text, facts, lang, forbidden_names)
         attempts.append({"provider": "template", "ok": verdict.ok, "problems": verdict.problems})

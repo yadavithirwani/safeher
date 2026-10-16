@@ -7,7 +7,6 @@ import logging
 from contextlib import asynccontextmanager, suppress
 import copy
 import json
-import logging
 import re
 import threading
 import time
@@ -29,7 +28,7 @@ from . import config, google, prepare
 from .areas import AREAS, area_for, get_area, timezone_at
 from .config import REPO_ROOT
 from .geo import LatLon, haversine_m
-from .explain import LANGUAGES, explain
+from .explain import LANGUAGES, ExplainFailed, explain
 from .plan import DISCLAIMER, KIND_LABELS, WALK_M_PER_MIN, plan
 from .pois import SAFE_SPACE_KINDS
 from .routing import load_area
@@ -237,8 +236,7 @@ def search(q: str = Query(min_length=1, max_length=80), area: str | None = None,
             preds = google.client().autocomplete(q.strip(), bbox, _session(session), near=near,
                                                  radius_m=float(ANYWHERE["google_search_bias_km"]) * 1000)
         except google.GoogleError as e:
-            logging.warning("Google autocomplete failed, showing local results only: %s", e)
-            preds = []
+            raise HTTPException(502, f"Google search failed: {e}") from e
         local_names = {r["name"].lower() for r in results}
         for pr in preds:
             if pr["main"].lower() in local_names:
@@ -310,7 +308,7 @@ def _google_routes(o: LatLon, d: LatLon) -> tuple[list[dict], str | None]:
     try:
         routes = google.client().walking_routes(o, d)
     except google.GoogleError as e:
-        return [], f"Google routes unavailable ({e}); showing SafeHer routes only."
+        raise HTTPException(502, f"Google routes failed: {e}") from e
     # Google's first route is the one it recommends; config decides how many to compare.
     external = [{"label": GOOGLE["route_label"] if i == 0 else f"{GOOGLE['route_label']} {i + 1}",
                  "source": "google", "points": r["points"]}
@@ -345,7 +343,10 @@ def explain_trip(req: ExplainRequest):
     # Landmarks at the start or end of the trip may be named; any other place not in the facts may not.
     at_endpoints = {lm.name for lm in get_area(p["area"]["id"]).landmarks
                     if min(haversine_m((lm.lat, lm.lon), o), haversine_m((lm.lat, lm.lon), d)) < ENDPOINT_LANDMARK_M}
-    result = explain(p, req.lang, forbidden_names=_area_place_names(p["area"]["id"]) - at_endpoints)
+    try:
+        result = explain(p, req.lang, forbidden_names=_area_place_names(p["area"]["id"]) - at_endpoints)
+    except ExplainFailed as e:
+        raise HTTPException(502, str(e)) from e
     return {k: result[k] for k in ("text", "provider", "model", "lang", "checked")}
 
 
@@ -364,9 +365,8 @@ def nearby(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180
         try:
             local = when.astimezone(area.tz if area else ZoneInfo(timezone_at(lat, lon)))
             return _google_nearby(lat, lon, kind, local, limit, area, live)
-        except google.GoogleError:
-            if area is None:
-                raise HTTPException(502, "Nearby places are unavailable here right now.")
+        except google.GoogleError as e:
+            raise HTTPException(502, f"Google nearby search failed: {e}") from e
     if area is None:
         raise HTTPException(422, "SafeHer has no street data here yet. Plan a trip here first.")
     data = load_area(area.id)

@@ -14,6 +14,9 @@ def no_real_google_by_default(monkeypatch):
     `python -m safeher.google_check` checks the real APIs."""
     if os.environ.get("SAFEHER_LIVE_GOOGLE") != "1":
         monkeypatch.setattr(google, "api_key", lambda: "")
+        # Every real key in backend/.env is hidden (an empty env var wins over .env in load_dotenv).
+        for name in ("GOOGLE_MAPS_API_KEY", "GEMINI_API_KEY", "EARTHDATA_TOKEN"):
+            monkeypatch.setenv(name, "")
 
 
 @pytest.fixture(autouse=True)

@@ -117,18 +117,26 @@ def test_bad_answer_retried_with_feedback_then_accepted(delhi_plan, facts):
     assert "rejected for" in prompts[1] and "forbidden wording" in prompts[1]
 
 
-def test_persistently_bad_model_falls_back_to_template(delhi_plan):
-    r = ex.explain(delhi_plan, "en", providers={"fake": lambda s, u: ("Totally safe, 999 lamps.", "fake")},
+def test_persistently_bad_answers_are_an_error_not_a_template(delhi_plan):
+    """No silent fallback: answers that fail the fact checks twice surface as an error."""
+    with pytest.raises(ex.ExplainFailed, match="failed the fact checks twice"):
+        ex.explain(delhi_plan, "en", providers={"fake": lambda s, u: ("Totally safe, 999 lamps.", "fake")},
                    order=["fake"])
-    assert r["provider"] == "template"
-    assert [a["provider"] for a in r["attempts"]] == ["fake", "fake", "template"]
 
 
-def test_unavailable_provider_falls_back_to_template(delhi_plan):
+def test_failing_configured_provider_is_an_error(delhi_plan):
     def down(system, user):
-        raise ex.ProviderUnavailable("no key")
+        raise ex.ProviderUnavailable("HTTP 503: model overloaded")
 
-    r = ex.explain(delhi_plan, "hi", providers={"gemini": down}, order=["gemini"])
+    with pytest.raises(ex.ExplainFailed, match="Gemini failed: HTTP 503"):
+        ex.explain(delhi_plan, "hi", providers={"gemini": down}, order=["gemini"])
+
+
+def test_unconfigured_provider_means_route_data_summary(delhi_plan):
+    def no_key(system, user):
+        raise ex.NotConfigured("GEMINI_API_KEY not set")
+
+    r = ex.explain(delhi_plan, "hi", providers={"gemini": no_key}, order=["gemini"])
     assert r["provider"] == "template" and r["lang"] == "hi"
 
 

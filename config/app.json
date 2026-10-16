@@ -123,5 +123,15 @@
     "retry_failed_after_s": 60,
     "poll_interval_ms": 2000,
     "google_search_bias_km": 30
+  },
+  "gemini": {
+    "_comment": "GEMINI_MODEL in backend/.env overrides model. Thinking is kept low: explanations are short and must be fast.",
+    "model": "gemini-3.8-flash",
+    "thinking_level": "low",
+    "max_output_tokens": 1024,
+    "temperature": 0.2,
+    "timeout_s": 25,
+    "busy_retries": 2,
+    "busy_retry_pause_s": 1.5
   }
 }

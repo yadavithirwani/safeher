@@ -234,11 +234,10 @@ def test_different_google_route_is_scored_by_our_engine(google_on):
     assert [r["score"] for r in p["routes"]] == sorted((r["score"] for r in p["routes"]), reverse=True)
 
 
-def test_google_failure_keeps_safeher_routes(google_on):
+def test_google_failure_is_an_error_not_a_quiet_fallback(google_on):
     c = google_on(FakeGoogle(status=429))
-    p = c.post("/api/plan", json=plan_body()).json()
-    assert p["routes"] and all(r["source"] == "safeher" for r in p["routes"])
-    assert any("Google routes unavailable" in n for n in p["data_notes"])
+    r = c.post("/api/plan", json=plan_body())
+    assert r.status_code == 502 and "Google routes failed" in r.json()["detail"]
 
 
 def test_google_route_leaving_the_area_is_not_scored(google_on):
@@ -265,11 +264,17 @@ def test_nearby_for_a_later_time_uses_open_data(google_on):
     assert r["source"] == "openstreetmap"
 
 
-def test_nearby_falls_back_when_google_fails(google_on):
+def test_nearby_google_failure_is_an_error(google_on):
     c = google_on(FakeGoogle(status=500))
     now = datetime.now(timezone.utc).isoformat()
-    r = c.get("/api/nearby", params={"lat": 28.5433, "lon": 77.2067, "kind": "police", "depart_at": now}).json()
-    assert r["source"] == "openstreetmap" and r["results"]
+    r = c.get("/api/nearby", params={"lat": 28.5433, "lon": 77.2067, "kind": "police", "depart_at": now})
+    assert r.status_code == 502 and "Google nearby search failed" in r.json()["detail"]
+
+
+def test_search_google_failure_is_an_error(google_on):
+    c = google_on(FakeGoogle(status=403))
+    r = c.get("/api/search", params={"q": "toit", "area": DEL.id})
+    assert r.status_code == 502 and "Google search failed" in r.json()["detail"]
 
 
 def test_search_adds_google_predictions_after_local_results(google_on):

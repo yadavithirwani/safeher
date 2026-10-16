@@ -224,8 +224,12 @@ function setPoint(which, p) {
 
 function setupSearch(inputSel, listSel, which) {
   const input = $(inputSel), list = $(listSel);
-  let items = [], active = -1, empty = "";
+  let items = [], active = -1, empty = "", searchError = "";
   const render = () => {
+    if (empty && searchError) {
+      list.innerHTML = `<li class="suggest-empty">${icon("error")}<div><b>Search failed</b><small>${esc(searchError)}</small></div></li>`;
+      return;
+    }
     if (empty) {
       list.innerHTML = `<li class="suggest-empty">${icon("search_off")}<div><b>No matches for “${esc(empty)}”</b>
         <small>SafeHer has data for ${esc(state.areas.map((a) => `${a.name} (${a.city})`).join(" and "))} only.</small></div></li>`;
@@ -258,8 +262,11 @@ function setupSearch(inputSel, listSel, which) {
     const s = googleOn("autocomplete") ? `&session=${session}` : "";
     const c = map ? map.getCenter() : null;
     const near = c ? `&lat=${c.lat.toFixed(5)}&lon=${c.lng.toFixed(5)}` : "";
-    try { items = await api(`/api/search?q=${encodeURIComponent(q)}&area=${state.area.id}${s}${near}`); } catch { items = []; }
+    let failed = "";
+    try { items = await api(`/api/search?q=${encodeURIComponent(q)}&area=${state.area.id}${s}${near}`); }
+    catch (err) { items = []; failed = err.message; } // show the error; never pretend there were no matches
     empty = items.length ? "" : q;
+    searchError = failed;
     active = items.length ? 0 : -1; render();
   }, 120);
   input.addEventListener("focus", () => { input.select(); items = landmarkItems(); active = -1; empty = ""; render(); });

@@ -87,7 +87,7 @@ See [§7 Scoring model](#7-scoring-model). Every number shown to the user can be
   - names a place in the area that isn't in the facts. Trip start and end landmarks are allowed.
   - is in the wrong language, mixes scripts inside a word, or uses unexpected scripts.
   - runs longer than about three sentences.
-- A failing answer is retried once with the problems listed. If it still fails, the template is used. The template passes the check in all 20 tested cases (2 cities × 5 times × 2 languages).
+- A failing answer is retried once with the problems listed. If it still fails, the user sees an error (no silent template fallback, since 16 Oct). The template is used only when no AI provider is configured. The template passes the check in all 20 tested cases (2 cities × 5 times × 2 languages).
 - **Languages:** English and Hindi at launch for explanations (the other spec languages to follow).
 - **UI:** an explanation card above the route cards with an EN | हिं toggle. It labels its source ("Explained by Gemini" / "Summary from route data") and shows "Checked against this route's data".
 - **Finding:** in testing, the local `phi3:mini` answers failed in English (used "safe", invented a number). Its Hindi passed the original checks but was unusable: mixed scripts, Cyrillic letters, wrong route times, 6–12 s per answer. The script, mixed-word and must-state-scores checks were added because of this, and the local model was made opt-in.
@@ -487,3 +487,6 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 16 Oct 2026 | OpenStreetMap stays as the street network and scoring data; Google adds search, live hours, basemap and route comparison | Google provides no lighting, lamps or walkable street graph, and its terms forbid storing its data to build our own scores |
 | 16 Oct 2026 | Go anywhere: corridor downloads on first use + Google preview meanwhile (§8.10) | User: "go anywhere, not just demo areas"; Google can route but can't supply scoring data |
 | 16 Oct 2026 | Tests never download street data (trip areas go to a temp folder, download stubbed) | A test downloaded a real Mumbai corridor during the run |
+| 16 Oct 2026 | **No silent fallbacks.** A configured key that fails (Gemini, Google Maps), or a Gemini answer that fails the fact checks twice, is an error shown to the user (HTTP 502 + message). A key that isn't set means the feature is off. Retries for "busy" (429/503) are kept: retrying isn't falling back | User: "I want it to fail if any token is not working or anything is wrong" |
+| 16 Oct 2026 | Gemini model and thinking level in `config/app.json` (`gemini-3.8-flash`, `thinkingLevel: low`) | `gemini-2.5-flash` is closed to new users; newer Flash models spent the whole output allowance thinking and returned no text |
+| 16 Oct 2026 | Tests hide every real key (Maps, Gemini, Earthdata) unless `SAFEHER_LIVE_GOOGLE=1` | A test had reached the real Gemini key |
