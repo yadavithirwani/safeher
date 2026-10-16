@@ -338,7 +338,8 @@ Rebuild with `python -m safeher.fetch` (from `backend/`). Snapshots are committe
 
 - **Terms:** Places and Routes content may only appear on a Google map, so every Google content feature also requires the Google basemap (`g_on()` in `api.py`, tested). Only place IDs are kept; tiles and images pass through with `Cache-Control: no-store`. The key never reaches the browser.
 - **Config:** `config/app.json → google` (feature switches, place types per quick action, timeouts, dark styles). Key: `GOOGLE_MAPS_API_KEY` in `backend/.env`.
-- **Verification:** 23 tests against a mock built from documented response shapes (request building, parsing, fallbacks, terms), plus a test-only simulated-Google server for browser tests. **Real behaviour is checked with `python -m safeher.google_check`** once a key exists; it has not been run yet (no key).
+- **Verification:** 23 tests against a mock built from documented response shapes (request building, parsing, fallbacks, terms), plus a test-only simulated-Google server for browser tests. **Real behaviour is checked with `python -m safeher.google_check`**: on 16 Oct 2026 all 8 checks passed with a real key. Tests never call real Google unless `SAFEHER_LIVE_GOOGLE=1`.
+- **Live findings (16 Oct 2026):** Google's walking route had outscored SafeHer's "Most support" (80 vs 78), because the support search optimised a per-street average and missed the weakest-stretch term. Now every support setting is tried and candidates are ranked by the full route score. Result: Delhi at night, SafeHer 81 in 37 min vs Google 80 in 41 min; Bengaluru, SafeHer's route *is* Google's route ("Also Google's route"). Google's washroom data (Sulabh/SBM toilets, open now) is far better than OSM's. Its "police" results include some mislabelled places (e.g. a community centre in a police colony), shown as Google lists them.
 
 ### 8.9 Stress testing (13–14 Oct 2026)
 | Layer | What | Found and fixed |
@@ -473,3 +474,6 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 14 Oct 2026 | Stress-testing suite: data integrity, fuzzing, load, equivalence (§8.9) | "Stress test all the data" |
 | 14 Oct 2026 | Run with 4 workers; plans cached and shared with explanations | 7× throughput under load |
 | 14 Oct 2026 | Live sharing stays on SQLite (WAL + wipe after delete); DuckDB reserved for analytics | DuckDB is single-writer-process; SQLite fits small concurrent writes |
+| 16 Oct 2026 | "Most support" = best full route score among all support settings (λ 6, 3, 1.5, 0.75); config v2026-10-16.1 | Real Google comparison exposed a better route the old search missed |
+| 16 Oct 2026 | Compare only Google's recommended route (`google.max_routes = 1`); keep Google places whose primary type was requested | Six route cards were noise; type filter removes obvious mismatches |
+| 16 Oct 2026 | Tests never call real Google by default | No cost, no network dependence, reproducible results |
