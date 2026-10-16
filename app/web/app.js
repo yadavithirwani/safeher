@@ -109,7 +109,15 @@ function addLayers() {
   const add = (id, src) => { if (!map.getSource(id)) map.addSource(id, { type: "geojson", data: src || empty }); };
   ["overlays", "alt-routes", "pieces", "weak"].forEach((id) => add(id));
 
-  // Street lamps glow at night; police & washrooms as small dots when zoomed in.
+  // Night only: NASA night-light pixels (~460 m) shaded by brightness rank in the city, streets mapped
+  // as lit in OpenStreetMap, then individually mapped street lamps on top.
+  map.addLayer({ id: "night-glow", type: "fill", source: "overlays", filter: ["==", ["get", "kind"], "night_light"],
+    paint: { "fill-color": COLORS.accent, "fill-antialias": false,
+      "fill-opacity": state.dark ? NIGHT_GLOW_OPACITY : 0 } });
+  map.addLayer({ id: "lit-streets", type: "line", source: "overlays", filter: ["==", ["get", "kind"], "lit_street"],
+    layout: { "line-cap": "round" },
+    paint: { "line-color": COLORS.accent, "line-width": ["interpolate", ["linear"], ["zoom"], 14, 1, 17, 3],
+      "line-blur": 1, "line-opacity": state.dark ? 0.55 : 0 } });
   map.addLayer({ id: "lamps", type: "circle", source: "overlays", filter: ["==", ["get", "kind"], "street_lamp"],
     paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 13, 1.5, 17, 4], "circle-color": COLORS.accent,
       "circle-opacity": state.dark ? 0.85 : 0.0, "circle-blur": 0.4 } });
@@ -134,8 +142,9 @@ function addLayers() {
   drawRoutes(state.pendingFit);
 }
 
-/* Street lamps, police and washrooms for the visible map; only when zoomed in (thousands of lamps otherwise). */
+/* Street lamps, police, washrooms, lit streets and night lights for the visible map; only when zoomed in. */
 const OVERLAY_MIN_ZOOM = 14;
+const NIGHT_GLOW_OPACITY = ["interpolate", ["linear"], ["get", "rank"], 0.5, 0, 0.8, 0.12, 1, 0.32];  // only brighter than the city median
 async function loadOverlays() {
   if (!map || !map.getSource("overlays")) return;
   const empty = { type: "FeatureCollection", features: [] };
@@ -333,6 +342,8 @@ function drawRoutes(fit) {
     features: sel ? sel.pieces.map((p) => line(p.coords, { score: p.score, light: p.light })) : [] });
   map.getSource("weak").setData({ type: "FeatureCollection", features: [] });
   map.setPaintProperty("lamps", "circle-opacity", state.dark ? 0.85 : 0);
+  map.setPaintProperty("night-glow", "fill-opacity", state.dark ? NIGHT_GLOW_OPACITY : 0);
+  map.setPaintProperty("lit-streets", "line-opacity", state.dark ? 0.55 : 0);
   map.setPaintProperty("lit-glow", "line-opacity", state.dark ? 0.55 : 0);
 
   drawLabels();

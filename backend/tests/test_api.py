@@ -93,13 +93,27 @@ def test_report_validation(client):
 def test_layers_and_web_app(client):
     box = {"south": 12.965, "west": 77.60, "north": 12.985, "east": 77.645}  # Indiranagar → MG Road
     fc = client.get("/api/layers", params=box).json()
-    assert any(f["properties"]["kind"] == "street_lamp" for f in fc["features"])
-    assert all(box["west"] <= f["geometry"]["coordinates"][0] <= box["east"] for f in fc["features"])
+    kinds = {f["properties"]["kind"] for f in fc["features"]}
+    assert {"street_lamp", "lit_street", "night_light"} <= kinds
+    points = [f for f in fc["features"] if f["geometry"]["type"] == "Point"]
+    assert all(box["west"] <= f["geometry"]["coordinates"][0] <= box["east"] for f in points)
+    pixels = [f["properties"] for f in fc["features"] if f["properties"]["kind"] == "night_light"]
+    assert all(0 <= p["rank"] <= 1 and p["radiance"] > 0 for p in pixels)
+    assert max(p["rank"] for p in pixels) > 0.9  # central Bengaluru is among the city's brightest areas
     whole_city = {"south": 12.83, "west": 77.45, "north": 13.15, "east": 77.78}
     assert client.get("/api/layers", params=whole_city).status_code == 422  # zoom in first
     page = client.get("/")
     assert page.status_code == 200 and "SafeHer" in page.text
     assert page.headers["cache-control"] == "no-cache"
+
+
+def test_night_lights_mark_dark_places_dark():
+    """NASA night lights rank Hauz Khas Deer Park (woodland) below the metro station and Select Citywalk mall."""
+    from safeher import store
+    from safeher.cities import CITIES
+    rank = lambda lat, lon: min(store.night_light_pixels(CITIES["delhi"], lat, lon, lat, lon),  # noqa: E731
+                                key=lambda p: abs(p["lat"] - lat) + abs(p["lon"] - lon))["rank"]
+    assert rank(28.5525, 77.1950) < rank(28.5433, 77.2067) < rank(28.5286, 77.2195)  # park < metro < mall
 
 
 def test_explain_endpoint_returns_checked_text(client, monkeypatch):
@@ -120,3 +134,9 @@ def test_report_far_from_any_street_is_refused(client):
     """Found by fuzzing: a tap far from streets used to crash the server. (Turahalli forest, >300 m from any street.)"""
     r = client.post("/api/reports", json={"lat": 12.8625, "lon": 77.4945, "category": "harassment"})
     assert r.status_code == 422 and "near a street" in r.json()["detail"]
+
+
+def test_nearby_where_there_are_no_streets_is_a_clear_error_not_a_crash(client):
+    """Found by fuzzing: inside Delhi's bbox but nowhere near a mapped street."""
+    r = client.get("/api/nearby", params={"lat": 28.75, "lon": 77.3125, "kind": "police", "depart_at": "2026-10-14T23:45:00"})
+    assert r.status_code == 422 and "No street data" in r.json()["detail"]

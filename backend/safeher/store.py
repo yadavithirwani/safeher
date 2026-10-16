@@ -195,3 +195,25 @@ def street_near(city: City, p: LatLon, max_m: float) -> str | None:
                          [city.id, p[0] - 2 * d, p[0] + 2 * d, p[1] - 2.2 * d, p[1] + 2.2 * d]).fetchall()
     best = min(rows, key=lambda r: haversine_m(p, (r[1], r[2])), default=None)
     return best[0] if best and haversine_m(p, (best[1], best[2])) <= max_m else None
+
+
+def lit_streets(city: City, south: float, west: float, north: float, east: float) -> list[tuple]:
+    """Street segments tagged lit=yes in OpenStreetMap inside a box: (lat1, lon1, lat2, lon2, name)."""
+    return con().execute("""SELECT lat1, lon1, lat2, lon2, name FROM segments WHERE city = ? AND lit = 'yes'
+                            AND lat1 BETWEEN ? AND ? AND lon1 BETWEEN ? AND ?""",
+                         [city.id, south, north, west, east]).fetchall()
+
+
+def night_light_pixels(city: City, south: float, west: float, north: float, east: float) -> list[dict]:
+    """NASA VIIRS pixels inside a box, each with its half-size and city-wide brightness rank (0-1)."""
+    grid = night_lights(city.id)
+    if grid is None:
+        return []
+    half_lat, half_lon = grid._dlat / 2, grid._dlon / 2
+    rows = con().execute("""SELECT lat, lon, radiance FROM night_lights WHERE city = ? AND lat BETWEEN ? AND ?
+                            AND lon BETWEEN ? AND ?""", [city.id, south - half_lat, north + half_lat,
+                                                         west - half_lon, east + half_lon]).fetchall()
+    n = len(grid._sorted)
+    ranks = np.searchsorted(grid._sorted, [r[2] for r in rows]) / max(1, n - 1)
+    return [{"lat": lat, "lon": lon, "half_lat": half_lat, "half_lon": half_lon, "radiance": rad, "rank": float(k)}
+            for (lat, lon, rad), k in zip(rows, ranks)]

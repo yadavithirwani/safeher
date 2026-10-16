@@ -333,7 +333,10 @@ def nearby(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180
             return _google_nearby(lat, lon, kind, local, limit, city, live)
         except google.GoogleError as e:
             raise HTTPException(502, f"Google nearby search failed: {e}") from e
-    data = store.corridor_data(corridor((lat, lon), (lat, lon)))  # the city's data around this point
+    try:
+        data = store.corridor_data(corridor((lat, lon), (lat, lon)))  # the city's data around this point
+    except ValueError as e:  # e.g. fields or water with no mapped streets nearby
+        raise HTTPException(422, f"No street data near this point ({e}).") from e
     index = data.safe_spaces if kind == "open_places" else data.stops
     out = []
     for dist, poi in index.within((lat, lon), NEARBY_RADIUS_M):
@@ -463,7 +466,8 @@ def google_streetview(lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-
 @app.get("/api/layers")
 def layers(south: float = Query(ge=-90, le=90), west: float = Query(ge=-180, le=180),
            north: float = Query(ge=-90, le=90), east: float = Query(ge=-180, le=180)):
-    """Map overlays for the visible map (street lamps, police stations, washrooms) as GeoJSON."""
+    """Map overlays for the visible map as GeoJSON: street lamps, police stations, washrooms, lit streets
+    (OpenStreetMap) and NASA night-light pixels."""
     c = city_at((south + north) / 2, (west + east) / 2)
     if c is None:
         return {"type": "FeatureCollection", "features": []}
@@ -479,6 +483,17 @@ def layers(south: float = Query(ge=-90, le=90), west: float = Query(ge=-180, le=
                 features.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [poi.lon, poi.lat]},
                                  "properties": {"kind": poi.kind,
                                                 "name": poi.name or KIND_LABELS.get(poi.kind, poi.kind).capitalize()}})
+    # Streets mapped as lit (OpenStreetMap), far more of them than individually mapped lamps.
+    for la1, lo1, la2, lo2, name in store.lit_streets(c, south, west, north, east):
+        features.append({"type": "Feature", "geometry": {"type": "LineString", "coordinates": [[lo1, la1], [lo2, la2]]},
+                         "properties": {"kind": "lit_street", "name": name or "Lit street"}})
+    # NASA night lights: ~460 m pixels shaded by brightness rank in the city. Shows lit and dark areas,
+    # not individual lamps.
+    for px in store.night_light_pixels(c, south, west, north, east):
+        s, n, w, e = px["lat"] - px["half_lat"], px["lat"] + px["half_lat"], px["lon"] - px["half_lon"], px["lon"] + px["half_lon"]
+        features.append({"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[w, s], [e, s], [e, n], [w, n], [w, s]]]},
+                         "properties": {"kind": "night_light", "rank": round(px["rank"], 3),
+                                        "radiance": round(px["radiance"], 1)}})
     return {"type": "FeatureCollection", "features": features}
 
 
