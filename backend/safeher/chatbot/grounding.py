@@ -12,15 +12,19 @@ import asyncio
 import httpx
 
 from .. import config
-from ..explain import ProviderUnavailable, _env, _vertex_token
+from ..explain import BANNED, ProviderUnavailable, _env, _vertex_token, gemini_model, thinking
 
 CFG = config.app()["maps_grounding"]
 URL = ("https://aiplatform.googleapis.com/v1beta1/projects/{project}/locations/global/publishers/google/"
        "models/{model}:generateContent")
-SYSTEM = ("You answer questions about places for a women's walking-safety app in India. Use Google Maps "
-          "information only; say so when it doesn't cover something. Keep it to 2-4 short sentences. "
-          "Never call a place or area 'safe' or 'unsafe'; describe facts (opening hours, how busy, "
-          "lighting or crowd remarks in reviews). For emergencies, tell the user to call 112.")
+SYSTEM = ("You answer questions about places for a women's walking-safety app in India, and only their "
+          "safety side: whether a place is open late or staffed, how busy or deserted it gets at night, "
+          "remarks in reviews about lighting, crowds, security or getting there, and nearby police, "
+          "hospitals or transit. Ignore food, drink, prices, decor and entertainment; if the question is "
+          "only about those, say you can only cover safety-related facts. Use Google Maps information "
+          "only and say when it doesn't cover something. 2-4 short sentences. Describe facts; never call a "
+          "place or area safe, unsafe or dangerous, and never guarantee anything. If someone is in "
+          "immediate trouble, tell them to call 112.")
 
 
 class NotConfigured(ProviderUnavailable):
@@ -45,24 +49,43 @@ def parse(data: dict) -> dict:
     return {"text": text, "sources": sources[: int(CFG["max_sources"])]}
 
 
+def wording_problems(text: str) -> list[str]:
+    """The same forbidden wording as route explanations: no 'safe', 'unsafe', 'dangerous', guarantees."""
+    import re
+    return [m.group(0) for pat in BANNED["en"] if (m := re.search(pat, text, flags=re.IGNORECASE))]
+
+
 async def ask(question: str, near: tuple[float, float] | None, transport=None) -> dict:
+    """A grounded answer whose wording passes the checks; one retry, then an error (never unchecked)."""
+    out = await _ask(question, near, transport, SYSTEM)
+    bad = wording_problems(out["text"])
+    if bad:
+        out = await _ask(question, near, transport, SYSTEM + " Your previous answer used the words "
+                         + ", ".join(repr(b) for b in bad) + "; describe facts without them.")
+        bad = wording_problems(out["text"])
+        if bad:
+            raise ProviderUnavailable("Google Maps answer used wording SafeHer doesn't allow: " + ", ".join(bad))
+    return out
+
+
+async def _ask(question: str, near: tuple[float, float] | None, transport, system: str) -> dict:
     project = _env("GOOGLE_CLOUD_PROJECT")
     if not project:
         raise NotConfigured("Google Maps grounding needs GOOGLE_CLOUD_PROJECT (Vertex AI).")
     token = await asyncio.to_thread(_vertex_token)
     body = {
-        "systemInstruction": {"parts": [{"text": SYSTEM}]},
+        "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": question}]}],
         "tools": [{"googleMaps": {}}],
-        # Low thinking: unlimited, the model spent the allowance thinking and cut the answer off.
+        # Thinking off: unlimited, the model spent the allowance thinking and cut the answer off.
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": int(CFG["max_output_tokens"]),
-                             "thinkingConfig": {"thinkingLevel": CFG["thinking_level"]}},
+                             "thinkingConfig": thinking(CFG["thinking_budget"])},
     }
     retrieval = {"languageCode": CFG["language"]}
     if near:
         retrieval["latLng"] = {"latitude": near[0], "longitude": near[1]}
     body["toolConfig"] = {"retrievalConfig": retrieval}
-    url = URL.format(project=project, model=_env("MAPS_GROUNDING_MODEL", CFG["model"]))
+    url = URL.format(project=project, model=gemini_model(_env("MAPS_GROUNDING_MODEL", CFG["model"])))
     try:
         async with httpx.AsyncClient(timeout=float(CFG["timeout_s"]), transport=transport) as client:
             r = await client.post(url, json=body, headers={"Authorization": f"Bearer {token}",

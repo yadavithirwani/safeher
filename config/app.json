@@ -111,15 +111,15 @@
   },
   "departure_window_days": 366,
   "gemini": {
-    "_comment": "GEMINI_MODEL in backend/.env overrides model. Thinking is kept low: explanations are short and must be fast. With GOOGLE_CLOUD_PROJECT set, Gemini runs on Vertex AI with Application Default Credentials (gcloud auth application-default login); GOOGLE_CLOUD_LOCATION overrides vertex_location.",
-    "model": "gemini-3.8-flash",
-    "thinking_level": "low",
+    "_comment": "Gemini 2.5 models only (enforced in code; never 3.x or newer). GEMINI_MODEL in backend/.env overrides. Thinking off (budget 0): explanations are short and must be fast. With GOOGLE_CLOUD_PROJECT set, Gemini runs on Vertex AI with Application Default Credentials; GOOGLE_CLOUD_LOCATION overrides vertex_location.",
+    "model": "gemini-2.5-flash",
     "max_output_tokens": 1024,
     "temperature": 0.2,
     "timeout_s": 25,
     "busy_retries": 2,
     "busy_retry_pause_s": 1.5,
-    "vertex_location": "global"
+    "vertex_location": "global",
+    "thinking_budget": 0
   },
   "default_city": "delhi",
   "trips": {
@@ -130,11 +130,28 @@
   },
   "maps_grounding": {
     "_comment": "HerSide's ask_google_maps tool: Gemini on Vertex AI grounded with Google Maps (needs GOOGLE_CLOUD_PROJECT + ADC). Billed per Maps query. Sources must be shown after the answer, attributed to 'Google Maps'.",
-    "model": "gemini-3.8-flash",
+    "model": "gemini-2.5-flash",
     "language": "en_IN",
     "max_sources": 6,
     "timeout_s": 30,
     "max_output_tokens": 2048,
-    "thinking_level": "low"
+    "thinking_budget": 0
+  },
+  "assistant_scope": {
+    "_comment": "HerSide answers personal-safety questions only. Every non-emergency message is classified first (Gemini, or Ollama when HerSide runs locally); out-of-scope messages are refused before any agent or tool runs. If the check fails, HerSide refuses rather than answering unchecked. Flash-Lite: 30/30 on the live test set, median 1.1 s.",
+    "model": "gemini-2.5-flash-lite",
+    "timeout_s": 8,
+    "allowed": {
+      "walking_route": "planning or comparing a walk: routes, timing, lighting, transit, weak stretches, Plan B",
+      "help_nearby": "finding police, hospitals, pharmacies, washrooms, transit stops, or places open and staffed late",
+      "place_safety_context": "safety-relevant facts about a place or area: open late, staffed, busy or deserted at night, lighting, crowds, how to get there or wait there",
+      "emergency_or_concern": "feeling unsafe, being followed, harassment, distress, helplines",
+      "reporting_or_sharing": "reporting a hazard or harassment, sharing live location, how SafeHer works",
+      "safety_guidance": "general personal-safety guidance for walking or travelling in Delhi or Bengaluru"
+    },
+    "refusal": "I can only help with walking safety: planning a route, finding help or open places nearby, safety facts about a place, reporting something, or sharing your location. For immediate danger in India, call 112.",
+    "check_failed": "I couldn't check that question just now, so I won't answer it. Try again, or use the route planner and the Police, Hospitals and Open now buttons. For immediate danger in India, call 112.",
+    "attempts": 2,
+    "thinking_budget": 0
   }
 }

@@ -22,6 +22,17 @@ def no_real_google_by_default(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def scope_check_offline(monkeypatch):
+    """HerSide's scope check calls a model; tests treat every message as in scope unless a test
+    exercises the check itself (scope._check_impl, test_chatbot_scope.py)."""
+    from safeher.chatbot import scope
+
+    async def allow(message, recent=None):
+        return scope.Verdict(True, "walking_route", "test")
+    monkeypatch.setattr(scope, "check", allow)
+
+
+@pytest.fixture(autouse=True)
 def private_user_database(monkeypatch, tmp_path):
     """Each test gets its own empty user database (reports, live trips) instead of backend/var."""
     from safeher import userdb

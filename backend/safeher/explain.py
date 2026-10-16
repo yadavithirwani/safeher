@@ -222,6 +222,19 @@ class ExplainFailed(Exception):
 
 
 GEMINI = config.app()["gemini"]
+ALLOWED_MODEL = re.compile(r"^gemini-2\.5-(flash|flash-lite)(-\d+)?$")  # project rule: Gemini 2.5 only, never newer
+
+
+def gemini_model(name: str) -> str:
+    """The model to call, refusing anything but Gemini 2.5 Flash / Flash-Lite (SafeHer uses 2.5 only)."""
+    if not ALLOWED_MODEL.match(name):
+        raise RuntimeError(f"SafeHer uses Gemini 2.5 Flash or Flash-Lite only; refusing model {name!r}")
+    return name
+
+
+def thinking(budget) -> dict:
+    """Gemini 2.5 thinking config: a token budget (0 = off, so short answers aren't cut off)."""
+    return {"thinkingBudget": int(budget)}
 
 
 _adc = None  # cached Application Default Credentials (refreshed when the token expires)
@@ -261,13 +274,11 @@ def gemini_target(model: str) -> tuple[str, dict]:
 
 
 def gemini_generate(system: str, user: str, timeout: float | None = None) -> tuple[str, str]:
-    model = _env("GEMINI_MODEL", GEMINI["model"])
+    model = gemini_model(_env("GEMINI_MODEL", GEMINI["model"]))
     url, headers = gemini_target(model)
     timeout = float(GEMINI["timeout_s"]) if timeout is None else timeout
     gen = {"temperature": GEMINI["temperature"], "maxOutputTokens": GEMINI["max_output_tokens"]}
-    if GEMINI.get("thinking_level"):
-        # Newer Flash models "think" first; unlimited, that can use the whole output allowance (empty answer).
-        gen["thinkingConfig"] = {"thinkingLevel": GEMINI["thinking_level"]}
+    gen["thinkingConfig"] = thinking(GEMINI["thinking_budget"])
     body = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user}]}],

@@ -247,3 +247,21 @@ def test_explain_checks_only_places_along_the_trip():
     from safeher import api
     names = api._corridor_place_names((28.5433, 77.2067), (28.5286, 77.2195))
     assert 200 < len(names) < 5000 and "Options" not in names
+
+
+def test_only_gemini_2_5_models_are_ever_used(monkeypatch):
+    """Project rule: Gemini 2.5 Flash / Flash-Lite only, never a newer model, wherever it is configured."""
+    from safeher import config
+    from safeher.chatbot import agents
+    for name in ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash-001"):
+        assert ex.gemini_model(name) == name
+    for name in ("gemini-3.8-flash", "gemini-3-pro", "gemini-2.5-pro", "gemini-4-argon"):
+        with pytest.raises(RuntimeError, match="2.5"):
+            ex.gemini_model(name)
+    app = config.app()
+    for section in ("gemini", "maps_grounding", "assistant_scope"):
+        assert ex.gemini_model(app[section]["model"])
+    monkeypatch.setenv("CHATBOT_PROVIDER", "gemini")
+    monkeypatch.setenv("CHATBOT_MODEL", "gemini-3.8-flash")
+    with pytest.raises(RuntimeError):
+        agents.model()
