@@ -154,3 +154,22 @@ def test_selected_trip_is_structured_and_reviewed_before_sending(page):
     page.locator('#chatbotSend').click()
     page.get_by_text('Measured comparison', exact=True).wait_for()
     assert 'trip' not in payloads[1]
+
+
+def test_google_maps_sources_follow_the_answer_with_attribution(page):
+    """Grounding with Google Maps terms: sources right after the answer, "Google Maps" untranslated,
+    the returned title linked to the returned URI."""
+    page.route('**/api/chat', lambda route: route.fulfill(json={'reply': 'Cafe Tesu is open until midnight.',
+        'sources': [{'title': 'Cafe Tesu - Google Maps', 'uri': 'https://maps.google.com/maps?cid=1',
+                     'reviews': [{'title': 'Review', 'uri': 'https://maps.google.com/r1'}]},
+                    {'title': 'Bad', 'uri': 'javascript:alert(1)'}]}))
+    page.locator('#chatbotInput').fill('Cafes open late near Hauz Khas?')
+    page.locator('#chatbotSend').click()
+    link = page.get_by_role('link', name='Cafe Tesu - Google Maps')
+    link.wait_for()
+    assert link.get_attribute('href') == 'https://maps.google.com/maps?cid=1'
+    assert link.get_attribute('rel') == 'noopener noreferrer'
+    label = page.locator('.herside-gmaps').first
+    assert label.inner_text() == 'Google Maps' and label.get_attribute('translate') == 'no'
+    assert page.locator('.herside-message').last.locator('p + .herside-sources').count() == 1  # right after the answer
+    assert not page.get_by_role('link', name='Bad').count()  # only https sources become links

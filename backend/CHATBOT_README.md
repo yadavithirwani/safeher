@@ -116,6 +116,10 @@ Reuse backend service functions rather than making loopback HTTP calls to our ow
 
 **Google considerations:** enable only required APIs, keep credentials server-side, restrict keys appropriately, and enforce quotas/timeouts. Review current attribution, caching and map-display terms before storing/displaying Google results on our MapLibre frontend. Do not persist full Google place responses by default. Retain provider attribution required for later rendering.
 
+### Grounding with Google Maps (`ask_google_maps`)
+
+Questions about places ("which cafés near me stay open after 10 pm?", "is Toit busy late, what do reviews say?") go to Gemini on Vertex AI with the `googleMaps` tool (`chatbot/grounding.py`, settings in `config/app.json` → `maps_grounding`). The reply is Gemini's grounded summary, labelled as such, followed by its Google Maps sources: each shows the unmodified text "Google Maps" (`translate="no"`) and the returned title linked to the returned URI, as Google's terms require. It is never a SafeHer score and is not plotted on the OpenStreetMap basemap. Needs `GOOGLE_CLOUD_PROJECT` + ADC; each question bills Google Maps queries to the project. Measured: 6–11 s per answer with 1–4 sources.
+
 ## 6. Backend API and conversation context
 
 Backend endpoint: **`POST /api/chat`**, JSON only.

@@ -108,7 +108,7 @@ Recording instructions: [demo/README.md](demo/README.md).
 7. Community hazard reporting
 8. Opt-in live location sharing (web, foreground only; expiring viewer link)
 9. Night map: NASA night-light glow, lit streets and mapped street lamps
-10. **HerSide** chat companion (Google ADK agents on local Ollama or Gemini): nearby help, selected-trip trade-offs, one-shot location, SOS
+10. **HerSide** chat companion (Google ADK agents on Gemini via Vertex AI, or local Ollama): nearby help, selected-trip trade-offs, **answers about places grounded with Google Maps** (open late? busy? reviews?) with their sources, one-shot location, SOS
 
 General multilingual Q&A and the aggregated H3 hotspot dashboard are **planned, not implemented**.
 

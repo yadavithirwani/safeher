@@ -17,7 +17,7 @@ Four sources are fetched once by the build pipeline into `data/safeher.duckdb`; 
 | NCRB · India Data Portal | Build | None | Yearly (latest: 2022) | `incidents` | Delhi police-district figure for each point on a route, low confidence |
 | Bengaluru City Police · OpenCity | Build | None | Yearly (latest: 2023) | `city_stats` | City-wide figures shown as context on Bengaluru trips; never scored (no district split) |
 | Google Maps Platform | Live | API key | Every request | Nothing (place IDs only) | Map, search, open-now, comparison route, Street View |
-| Gemini | Live | API key | Every new trip | Nothing | Plain-language explanation after fact checks |
+| Gemini (Vertex AI) | Live | ADC (Cloud project) | Every new trip / question | Nothing | Plain-language explanation after fact checks; HerSide agents; answers about places **grounded with Google Maps**, shown with their Google Maps sources |
 | People using SafeHer | Live | None | As they use it | `safeher.sqlite3` | Community reports, live-sharing sessions |
 
 ## 2 · One trip, from the browser to the backend and back

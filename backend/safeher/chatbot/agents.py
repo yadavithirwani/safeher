@@ -119,21 +119,25 @@ def build_agent_team():
         "Urgency means emergency actions first. For nonurgent assistance find relevant places. "
         "Missing or stale location needs clarification, not guesses.",
         [tools.get_emergency_actions, tools.search_near_current_location, tools.search_nearby_places, tools.resolve_location,
-         tools.estimate_walking_access, tools.ask_clarification])
+         tools.ask_google_maps, tools.estimate_walking_access, tools.ask_clarification])
     enquiry = specialist("local_enquiry", "Local pharmacy, police, hospital, toilet or other supported place search.",
         "Use the provided confirmed location when user means here/near me. If absent ask location. "
         "Search nearby first, then optionally get details or walking estimates. "
         "Never silently treat straight-line distance as walking distance. "
-        "For future opening times explain current listings cannot guarantee future availability.",
+        "For future opening times explain current listings cannot guarantee future availability. "
+        "For questions about what a place is like, whether it is open late, how busy it gets, what reviews "
+        "say, or places of a kind search_nearby_places doesn't cover (cafes open late, ATMs, malls), call "
+        "ask_google_maps with the user's question in full, including any place or area they named.",
         [tools.search_near_current_location, tools.search_nearby_places, tools.get_place_details, tools.resolve_location,
-         tools.estimate_walking_access, tools.ask_clarification, tools.get_emergency_actions])
+         tools.ask_google_maps, tools.estimate_walking_access, tools.ask_clarification, tools.get_emergency_actions])
     return Agent(name="supervisor", model=model(),
         description="Routes SafeHer requests to the appropriate specialist.",
         instruction=("You are a dispatcher. Read current_message, not earlier messages. "
         "For route planning, walking home, or comparing routes, call transfer_to_agent "
         "with agent_name='pre_trip'. For during-walk concerns call transfer_to_agent "
         "with agent_name='during_trip'. For nearby pharmacy, police, hospital or other "
-        "place search call transfer_to_agent with agent_name='local_enquiry'. "
+        "place search, or any question about a specific place or area (open late? busy? reviews?), "
+        "call transfer_to_agent with agent_name='local_enquiry'. "
         "Delegate even if information is missing: the specialist asks questions. "
         "Use the actual transfer_to_agent tool; agent names are NOT tools. "
         "Example nearby request: call transfer_to_agent(agent_name='local_enquiry'). "

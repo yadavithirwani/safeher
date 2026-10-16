@@ -116,3 +116,15 @@
   .herside[open], .herside-typing i { animation: none; }
   .herside * { scroll-behavior: auto !important; }
 }
+
+/* Google Maps grounding sources (attribution rules: "Google Maps" unmodified, Roboto/sans-serif 400,
+   12-16px, #5E5E5E / #1F1F1F / white, not wrapped or translated). */
+.herside-sources { margin-top: 10px; padding: 8px 10px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); }
+.herside-sources-head { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-2); margin-bottom: 4px; }
+.herside-source { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 4px 0; font-size: 13px; }
+.herside-source + .herside-source { border-top: 1px solid var(--border); }
+.herside-gmaps { font-family: Roboto, Arial, sans-serif; font-weight: 400; font-style: normal; letter-spacing: normal;
+  font-size: 12px; color: #5E5E5E; white-space: nowrap; }
+:root[data-theme="dark"] .herside-gmaps { color: #FFFFFF; }
+.herside-source a { color: var(--primary); text-decoration: none; font-weight: 500; }
+.herside-source a:hover { text-decoration: underline; }

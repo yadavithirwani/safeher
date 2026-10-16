@@ -113,7 +113,8 @@ class ChatService:
                 response.needs_clarification = True
             if observed.get("turn:budget_exceeded"):
                 response.warnings.append("Agent tool-call limit reached; please narrow the request.")
-            response.warnings.extend(warnings)
+            if not response.sources:  # a Google Maps answer about a named place didn't need a location
+                response.warnings.extend(warnings)
             return response
         except Exception:
             # Do not log exception text: HTTP/model errors may embed sensitive context or keys.

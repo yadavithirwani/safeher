@@ -127,5 +127,14 @@
     "max_trip_km": 8,
     "corridor_margin_m": 1200,
     "corridor_cache_size": 24
+  },
+  "maps_grounding": {
+    "_comment": "HerSide's ask_google_maps tool: Gemini on Vertex AI grounded with Google Maps (needs GOOGLE_CLOUD_PROJECT + ADC). Billed per Maps query. Sources must be shown after the answer, attributed to 'Google Maps'.",
+    "model": "gemini-3.8-flash",
+    "language": "en_IN",
+    "max_sources": 6,
+    "timeout_s": 30,
+    "max_output_tokens": 2048,
+    "thinking_level": "low"
   }
 }

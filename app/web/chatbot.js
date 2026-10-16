@@ -121,8 +121,30 @@
     link.rel = "noopener noreferrer";
     link.referrerPolicy = "no-referrer";
   }
+  /* Google Maps grounding: sources right after the answer, each attributed to "Google Maps"
+     (exact text, not translated), with the returned title linked to the returned URI. */
+  function sources(list, article) {
+    const box = node("div", undefined, article);
+    box.className = "herside-sources";
+    const head = node("div", undefined, box);
+    head.className = "herside-sources-head";
+    node("span", "Sources", head);
+    for (const src of list) {
+      if (!/^https:\/\//.test(src.uri || "")) continue;
+      const row = node("div", undefined, box);
+      row.className = "herside-source";
+      const label = node("span", "Google Maps", row);
+      label.className = "herside-gmaps";
+      label.setAttribute("translate", "no");
+      externalLink(row, src.title || "Place", src.uri);
+      for (const review of src.reviews || []) {
+        if (/^https:\/\//.test(review.uri || "")) externalLink(row, "Review", review.uri);
+      }
+    }
+  }
   function render(data) {
     const article = message("HerSide", data.reply || "No reply was available.");
+    if (data.sources?.length) sources(data.sources, article);
     for (const place of data.places || []) {
       const card = node("div", undefined, article);
       card.className = "herside-card";

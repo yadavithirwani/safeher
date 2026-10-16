@@ -7,6 +7,8 @@ from datetime import datetime
 
 from google.adk.tools import ToolContext
 
+from . import grounding
+from ..explain import ProviderUnavailable
 from .local_data import local_details, local_places, local_search, local_walking
 from .maps import KINDS, MapsClient, MapsUnavailable
 from .models import ChatResponse
@@ -200,6 +202,37 @@ def selected_trip_comparison(routes):
     return text
 
 
+def _grounding_bias(context):
+    """Where to centre Google Maps results: attached location, then trip destination, then a place
+    found this turn. A search bias only, not a confirmed location."""
+    location = context.state.get("turn:location")
+    if location:
+        return location["lat"], location["lon"]
+    trip = context.state.get("turn:trip")
+    if trip:
+        return trip["destination"]["lat"], trip["destination"]["lon"]
+    for evidence in reversed(context.state.get("turn:evidence", [])):
+        for place in evidence.get("places", []) + evidence.get("candidates", []):
+            if place.get("lat") is not None and place.get("lon") is not None:
+                return place["lat"], place["lon"]
+    return None
+
+
+async def ask_google_maps(question: str, tool_context: ToolContext) -> dict:
+    """Answer a question about places using Google Maps (Gemini grounded with Google Maps): what a place
+    is like, opening hours, how busy it gets, what reviews say, places of a kind not covered by
+    search_nearby_places. Returns an answer with Google Maps sources. Not for route scoring or emergencies."""
+    if not isinstance(question, str) or not 3 <= len(question.strip()) <= 500:
+        return {"error": "Ask a question of at most 500 characters."}
+    try:
+        answer = await grounding.ask(question.strip(), _grounding_bias(tool_context))
+    except grounding.NotConfigured:
+        return retain(tool_context, {"grounded_error": "Google Maps answers aren't set up on this server."})
+    except ProviderUnavailable as exc:
+        return retain(tool_context, {"grounded_error": str(exc)})
+    return retain(tool_context, {"grounded": answer, "source": "google_maps_grounding"})
+
+
 def get_plan_b_coverage(route_label: str, tool_context: ToolContext) -> dict:
     """Read Plan B for a route computed in this turn, not an arbitrary trip or private session."""
     for evidence in tool_context.state.get("turn:evidence", []):
@@ -230,6 +263,15 @@ def render_evidence(evidence: list[dict]) -> ChatResponse:
     for item in evidence:
         if item.get("warning"):
             response.warnings.append(item["warning"])
+        if "grounded" in item:
+            # Gemini's answer grounded with Google Maps: shown with its sources, never as SafeHer's data.
+            response.reply = item["grounded"]["text"]
+            response.sources = item["grounded"]["sources"]
+            response.needs_clarification = False
+            response.warnings.append("AI summary of Google Maps information; check the sources below. "
+                                     "It isn't a SafeHer score and can't confirm a place is safe or open.")
+        if "grounded_error" in item:
+            response.reply = f"I couldn't get an answer from Google Maps: {item['grounded_error']}"
         if "candidates" in item and item["candidates"]:
             candidates = item["candidates"]
             response.reply = "Please confirm the location: " + "; ".join(

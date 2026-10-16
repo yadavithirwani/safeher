@@ -58,6 +58,7 @@ class ChatResponse(BaseModel):
     routes: list[dict] = Field(default_factory=list)
     actions: list[Action] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    sources: list[dict] = Field(default_factory=list)  # Google Maps grounding sources, shown after the reply
     provider: str = "deterministic"
 
 
