@@ -1,8 +1,8 @@
 # SafeHer — current end-to-end implementation
 
-**Last reviewed: October 13, 2026.** This document describes executable code and data in this checkout, not the full product roadmap.
+**Last reviewed: October 16, 2026.** This document describes executable code and data in this checkout, not the full product roadmap.
 
-**October 16 update:** an initial backend-only Google ADK Companion now adds intent routing and tool orchestration via `POST /api/chat`. See [chatbot implementation, setup and validation limits](../backend/CHATBOT_README.md). Live Ollama/ADK/Places smoke checks have passed, while model reliability and Geocoding billing/configuration remain open; this guide's original AI-boundary discussion below describes the route-comparison UI, not the new backend agent endpoint.
+**Current scope:** route comparison, Plan B Coverage, opt-in live sharing, and the initial **HerSide** chat UI are integrated. HerSide uses Google ADK with Ollama-driven tool selection and evidence-rendered replies through `POST /api/chat`. This is ready for initial integration/demo use, not production-complete. Model reliability, natural-language time handling and Google Geocoding configuration remain open. See [chatbot setup and validation details](../backend/CHATBOT_README.md).
 
 Start here for how the app works today. [DESIGN_SPEC.md](DESIGN_SPEC.md) describes the broader intended product and includes features that do not exist yet. Update this guide when implementation changes.
 
@@ -13,7 +13,7 @@ SafeHer is a **walking-route comparison prototype** for two bounded pilot areas:
 - Bengaluru: Indiranagar–MG Road (`blr-indiranagar-mg-road`).
 - Delhi: Hauz Khas–Saket (`del-hauz-khas-saket`).
 
-The backend is Python/FastAPI. The frontend is HTML/CSS/JavaScript with MapLibre. Route generation, support scoring, nearby lookup, reports, Plan B Coverage and live sharing are **not AI**. An optional LLM writes the route-comparison explanation after the calculations.
+The backend is Python/FastAPI. The frontend is HTML/CSS/JavaScript with MapLibre. Route generation, support scoring, nearby lookup, reports, Plan B Coverage and live sharing are **not AI**. AI has two separate roles: an optional LLM writes route-comparison explanations after calculation; HerSide uses an LLM to route requests and select tools. Neither role computes or changes support scores.
 
 There is no trained SafeHer crime-prediction model. Scores indicate available supporting evidence, **not a probability of safety**. In an emergency, call 112.
 
@@ -45,9 +45,26 @@ flowchart TD
     OPTIN --> GPS[Browser GPS watch]
     GPS --> TRIPS[Owner-authorized updates: latest point in SQLite]
     TRIPS --> VIEW[Viewer link: polling map with age and accuracy]
+    UI --> CHAT[HerSide: question or reviewed selected trip]
+    ONCE[Explicit one-shot location attachment] --> CHAT
+    CHAT --> CHATAPI[POST /api/chat]
+    CHATAPI --> GUARD{SOS or recognized urgency?}
+    GUARD -->|Yes| EMERGENCY[Fixed India 112 response: no model or Maps]
+    GUARD -->|No| AGENTS[ADK supervisor and specialists: Ollama or Gemini]
+    AGENTS --> TOOLS[Validated tools: confirmed coordinates and departure]
+    TOOLS --> HYBRID[Google Places / Routes + local OSM fallback]
+    TOOLS --> RESOLVE[Local name candidates then Google Geocoding]
+    TOOLS --> LOAD
+    RESULT -->|Chat-requested plan only| EVIDENCE[Compact tool evidence: no full route geometry]
+    HYBRID --> EVIDENCE
+    RESOLVE --> EVIDENCE
+    EVIDENCE --> RENDER[Deterministic reply assembly]
+    RENDER --> CARDS[Chat reply, place/route cards, warnings, actions]
+    EMERGENCY --> CARDS
+    CARDS --> CHAT
 ```
 
-VIIRS is an optional lighting input if a local grid is loaded; no grids are currently present. Neither the regular planning request nor its score calculation requires an LLM or live GPS.
+VIIRS is an optional lighting input if a local grid is loaded; no grids are currently present. Neither the regular planning request nor its score calculation requires an LLM or live GPS. HerSide is an additional entry point to validated tools; it does not replace the route engine or share live-trip credentials with agents. See section 6 for its full turn-by-turn flow.
 
 ### Route-planning steps
 
@@ -74,7 +91,10 @@ VIIRS is an optional lighting input if a local grid is loaded; no grids are curr
 | Historical incidents | NCRB Crime in India via India Data Portal; `data/incidents/ncrb_delhi_police_districts.json` | Delhi district-level registered counts; not street-level incident locations. |
 | Community reports | App submissions; `backend/var/reports.jsonl` | Snapped location, category, timestamp, pending verification and optional note. Notes do not enter scoring or LLM facts. |
 | Trip request | User input | Origin, destination and departure time; optional explanation language. |
-| Live GPS | Browser geolocation after opt-in | Coordinates and accuracy for sharing only; not an input to the score or LLM. |
+| Live-sharing GPS | Browser `watchPosition` after separate sharing opt-in | Latest point/accuracy for a capability-protected trip session; not automatically supplied to chat or scoring. |
+| Chat question/context | User-entered text, last six stored user/reply strings | Supplied to the configured chat model; can include sensitive trip details. |
+| Chat location | Explicit one-shot `getCurrentPosition` attachment | Fresh, sufficiently accurate location is supplied to the chat model and relevant tools; never starts live sharing. |
+| Google place/address/walking data | Places, Geocoding and Routes APIs, used by chat tools | Live external lookup, source-labelled; not persisted into OSM snapshots or used as support-score inputs. |
 | Typical hours | `pois.py:TYPICAL_HOURS` | Manually coded assumptions when mapped hours are absent or invalid; flagged as assumed. |
 | Weights, severities, landmarks, helplines | Python constants | Product assumptions/configuration, not learned datasets. |
 | Satellite night lights | NASA Black Marble VNP46A4; optional `data/areas/<id>/viirs.npz` | Fetch/load support exists, but **not currently loaded**. Annual ~500 m upward-light estimates, not individual street lamps. |
@@ -92,7 +112,7 @@ NCRB processing averages selected public-space-related categories across **2019,
 
 The processed NCRB JSON is checked in; the source CSV expected by the rebuild script at `data/raw/ncrb/districtwise-caw-2017-onwards.csv` is not present in the checked-in data listing. See `ncrb.py` for the source resource URL.
 
-CARTO basemap tiles are **visual context**, not scoring input. Google Maps is an external navigation handoff, not the route engine. Google Places, live transit feeds and Google route scoring are not implemented inputs.
+CARTO basemap tiles are **visual context**, not scoring input. Google Maps is an external navigation handoff, not the SafeHer scored-route engine. HerSide additionally uses Google Places/Details and Google walking Routes; local name search precedes Google Geocoding. These do not feed the five-signal score. Live transit feeds and Google route scoring are not implemented.
 
 ## 4. How the support score works — no AI
 
@@ -148,7 +168,9 @@ Plan B does not change the score, candidate search, ranking or LLM facts. It doe
 
 ## 6. The exact AI boundary
 
-**Only the short route-comparison explanation currently uses generative AI.**
+There are **two independent AI pipelines**, with separate provider settings. Model output never replaces deterministic routing/scoring. The urgent chat fast path does not use AI.
+
+### 6.1 Route-comparison explanation
 
 Source: `explain.py`; endpoint: `/api/explain`; frontend: explanation card in `app.js`.
 
@@ -168,7 +190,174 @@ Providers:
 
 Supports English (`en`) and Hindi (`hi`). Checks constrain wording, length, numbers, known forbidden place names, required score mentions and scripts. Rejected output gets one rewrite attempt per provider; unavailable/rejected output falls back to a deterministic template. Explanations are cached in process.
 
-The API returns `text`, `provider`, `model`, `lang`, `checked`. Inspect `provider` to distinguish **actual AI text** from `template`. The `checked` flag is not proof of semantic truth: checks are limited, and the fallback is returned even if its own check reports problems internally. There is no trained prediction model, interactive Q&A, AI report moderation or AI hotspot narrative in the current app.
+The API returns `text`, `provider`, `model`, `lang`, `checked`. Inspect `provider` to distinguish **actual AI text** from `template`. The `checked` flag is not proof of semantic truth: checks are limited, and the fallback is returned even if its own check reports problems internally. There is no trained prediction model, AI report moderation or AI hotspot narrative. Interactive local-place/trip Q&A is implemented separately as HerSide below.
+
+### 6.2 HerSide: end-to-end conversational flow
+
+Sources: `app/web/chatbot.js`, `chatbot.css`, dialog markup in `index.html`; `backend/safeher/chatbot/{models,service,agents,tools,maps,local_data}.py`.
+
+#### Detailed chatbot architecture
+
+Solid arrows show request/data flow; dotted arrows show model configuration. The emergency preflight returns directly without initializing ADK or calling Google. Tools execute inside the same backend, not separate microservices.
+
+```mermaid
+flowchart TB
+    subgraph BROWSER[Browser - HerSide]
+        INPUT[Question or reviewed selected-trip text]
+        GPS[Explicit one-shot GPS attachment]
+        MEMORY[In-page history and session token - no persistent browser storage]
+        VIEW[Text-only replies, source-labelled cards and warnings]
+        CHOICE[User-selected call or Google Maps link]
+        INPUT --> CLIENT[chatbot.js - POST /api/chat]
+        GPS --> CLIENT
+        MEMORY <--> CLIENT
+        VIEW --> CHOICE
+    end
+
+    subgraph API[FastAPI - chatbot models.py and service.py]
+        VALIDATE[Pydantic request validation]
+        URGENT{SOS flag or recognized urgent phrase?}
+        FIXED[Fixed India 112 guidance and request-location action]
+        SESSION[Hashed bearer-token lookup - memory only\n30-minute idle TTL - max 200 sessions - per-session lock]
+        CONTEXT[Current message, last six dialogue strings, UTC time\nFresh usable attachment only - reject stale or inaccurate GPS]
+        RUNNER[Fresh ADK in-memory session per turn\n60-second execution timeout - max six model calls]
+        ASSEMBLE[render_evidence - deterministic factual reply assembly]
+        CLARIFY[No evidence - fixed clarification]
+        FAILURE[Execution failure - unavailable response and 112 guidance]
+        RESPONSE[ChatResponse - reply, intent, urgency, places, routes\nactions, warnings, provider and optional session token]
+        CLIENT --> VALIDATE --> URGENT
+        URGENT -->|Yes - bypass model and session lock| FIXED
+        URGENT -->|No| SESSION --> CONTEXT --> RUNNER
+        FIXED --> RESPONSE
+        ASSEMBLE --> RESPONSE
+        CLARIFY --> RESPONSE
+        FAILURE --> RESPONSE
+        RESPONSE --> VIEW
+        RESPONSE --> MEMORY
+    end
+
+    subgraph AGENTS[Google ADK - agents.py]
+        SUP[Supervisor - intent routing]
+        PRE[pre_trip - walking-route comparison]
+        DUR[during_trip - nearby assistance]
+        LOCAL[local_enquiry - supported place search]
+        MODEL[Model factory - separate from route explanations\nOllama via LiteLLM by default - optional Gemini]
+        RUNNER --> SUP
+        SUP --> PRE
+        SUP --> DUR
+        SUP --> LOCAL
+        MODEL -.-> SUP
+        MODEL -.-> PRE
+        MODEL -.-> DUR
+        MODEL -.-> LOCAL
+    end
+
+    subgraph TOOLS[Shared validated tool layer - tools.py]
+        GUARDS[Validate finite coordinates and conversation evidence\nExplicit ISO departure for planning - duplicate and eight-call guard]
+        RESOLVE[resolve_location]
+        NEARBY[search_nearby_places]
+        DETAILS[get_place_details - same-turn search IDs only]
+        WALK[estimate_walking_access - unscored]
+        PLAN[plan_supported_trip and get_plan_b_coverage]
+        ASK[ask_clarification]
+        ESCALATE[get_emergency_actions]
+        EVIDENCE[Per-turn source-labelled evidence\nCompact planning facts - no full route geometry]
+        PRE --> GUARDS
+        DUR --> GUARDS
+        LOCAL --> GUARDS
+        SUP --> GUARDS
+        GUARDS --> RESOLVE & NEARBY & DETAILS & WALK & PLAN & ASK & ESCALATE
+        RESOLVE & NEARBY & DETAILS & WALK & PLAN --> EVIDENCE
+        EVIDENCE --> ASSEMBLE
+        ASK --> CLARIFY
+        ESCALATE --> FIXED
+        RUNNER -->|Exception or timeout| FAILURE
+    end
+
+    subgraph DATA[Data adapters and deterministic services]
+        LOCALNAMES[local_data.py - curated landmarks and OSM names\nExact, partial, conservative fuzzy candidates - confirm match]
+        OSM[Read-only pilot OSM snapshots\nProvenance, hours assumptions and directed walking graph]
+        CORE[SafeHer plan.py and backup.py\nFive-signal scores and independent Plan B estimates]
+        MAPS[maps.py - Google REST adapter\nSystem trust store - TLS verified - bounded HTTP timeout]
+        GOOGLE[Google Places, Details, walking Routes and Geocoding\nAPI key, enabled APIs and billing required]
+        RESOLVE -->|Local first| LOCALNAMES
+        RESOLVE -->|No local match| MAPS
+        NEARBY -->|Google first| MAPS
+        NEARBY -->|Google empty or unavailable| OSM
+        DETAILS -->|Source-specific| MAPS
+        DETAILS -->|OSM result| OSM
+        WALK -->|Google first| MAPS
+        WALK -->|Unavailable or no route| OSM
+        PLAN --> CORE
+        CORE --> OSM
+        MAPS --> GOOGLE
+    end
+```
+
+**Reading the boundaries:** chat context and tool results can reach the configured model; relevant lookup coordinates/address queries reach Google. Continuous live-sharing GPS/tokens are not automatically available to agents. Google walking estimates are not SafeHer-scored routes, and Google results are not merged into OSM snapshots. Session lookup/validation errors return HTTP errors, while model/tool execution failures use a structured unavailable reply. The next sequence diagram shows one request through these components.
+
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant H as HerSide UI
+    participant API as Chat service
+    participant A as ADK supervisor / specialist
+    participant T as Validated tools
+    participant D as SafeHer / local OSM / Google
+    U->>H: Question, reviewed trip text, optional location attachment
+    H->>API: POST /api/chat: message, session_id, sos, location, lang
+    alt Explicit SOS or recognized urgent phrase
+        API-->>H: Fixed India 112 response and request-location action
+    else Ordinary turn
+        API->>API: Validate session; acquire lock; build bounded context
+        API->>A: Current message + recent dialogue + usable location
+        A->>T: Structured tool call after specialist delegation
+        T->>T: Check arguments, coordinate evidence, time and tool budget
+        T->>D: Search, walking estimate or pilot plan
+        D-->>T: Source-labelled facts or unavailable result
+        T-->>API: Retained per-turn evidence
+        API->>API: Assemble reply/cards from evidence, not model prose
+        API-->>H: Reply, places/routes, warnings, actions, session token
+    end
+    H-->>U: Text-only rendered results; explicit call/navigation choices
+```
+
+1. **Open and compose:** launch **HerSide · Ask for help**. Native modal, keyboard focus handling, suggested pharmacy question, selected-trip shortcut, separate SOS button and persistent India 112 link are available. UI currently submits English (`lang: "en"`); API accepts `en`/`hi`, but Hindi journey quality is not fully validated.
+2. **Review trip context:** “Compare my selected trip” copies selected origin/destination and departure into the input for review. It does not submit automatically. There is no automatic map/chat synchronization, private-trip lookup, persistent home address, or live-sharing access.
+3. **Attach location only by choice:** attachment invokes `getCurrentPosition`, not `watchPosition`. Coordinates, accuracy and observation timestamp are sent only on the next submission. UI discards an attachment older than two minutes and clears it after sending, removing it or closing the dialog. Merely opening chat never requests GPS.
+4. **Validate and check urgency first:** Pydantic validates request sizes, coordinates and language. Explicit `sos=true` or recognized urgent English/Hindi phrases return fixed India 112 guidance **before** session lookup, locking, ADK or external calls. This is phrase-based, not a reliable danger classifier. An agent can also escalate through `get_emergency_actions`. The fast response does not automatically start a nearby search; that needs a later turn.
+5. **Recover bounded conversation:** an opaque bearer session token is sent in the JSON body, hashed for server lookup. Sessions are process-memory only, capped at 200, with a 30-minute idle TTL and pruning during session access. Each keeps the last six user/reply strings (roughly three turns), not a full persistent transcript. Concurrent ordinary turns for one session get HTTP 409; expired/missing sessions get 404; capacity exhaustion gets 503. UI resets its token on 404 and asks the user to resend.
+6. **Build fresh ADK context:** each turn gets a temporary `InMemorySessionService` session, deleted after the turn. Context includes language, current UTC time, current message, recent dialogue and location warnings. Attachment timestamps must include timezone, be no more than 120 seconds old or 30 seconds in the future, and accuracy must be ≤100 m. Unusable attachments are not supplied as confirmed coordinates to the model/tools. This does not erase coordinates the user explicitly typed in messages/history.
+7. **Delegate:** `supervisor` chooses `pre_trip`, `during_trip` or `local_enquiry` using structured ADK transfers. Specialists share validation/tools. Temperature is zero, but handoffs and argument extraction remain model-dependent. Malformed/null/nonfinite coordinate arguments trigger errors/clarification rather than being trusted. Duplicate identical calls and calls beyond eight callback-counted tool invocations are blocked; runner also limits execution to six model calls and 60 seconds per turn.
+8. **Execute grounded tools:** coordinates must match an accepted attachment, per-turn place evidence, or numeric evidence in the conversation. This is an initial numeric-evidence guard, not semantic proof that a location is correct. Pilot planning additionally requires an explicitly confirmed ISO departure timestamp with timezone in conversation evidence. Missing/ambiguous inputs should lead to fixed clarification questions, not guessed home locations, times or cities.
+9. **Assemble evidence:** tools retain per-turn results; `render_evidence()` builds reply text, place/route records, warnings and action descriptors. Raw model prose is not used for factual answers. If no evidence exists, return a deterministic clarification. Execution failure/timeouts return an unavailable response with nearby-search and 112 guidance. `provider="adk"` describes orchestration, not independently verified prose; SOS uses `deterministic`.
+10. **Render safely:** UI uses `textContent` for provider/model-derived text, not injected HTML. Cards label sources, distance/hour basis, snapshot metadata when present, and warnings. Google place results link to Google Maps rather than being plotted on the OSM map. Route cards summarize distance/time, support score where present and Plan B share; they do not automatically replace the selected map route. Supported call links are allowlisted; calls and external navigation still require user action.
+11. **Keep emergency access independent:** SOS can interrupt the browser's pending fetch; its fixed server response does not wait for an ordinary turn's session lock. The UI has a 70-second request timeout and leaves the 112 link visible. Browser cancellation/closing is not a guarantee that server work stopped immediately.
+
+### 6.3 Tool and provider decisions
+
+| Need / tool | Actual source order and boundary |
+|---|---|
+| `resolve_location` | Curated landmarks and cached OSM names/aliases first: normalized case/punctuation, Bangalore/Bengaluru aliases, exact/partial/conservative fuzzy matching. Return up to three candidates requiring confirmation. Google Geocoding only when no local match; unavailable results request a more specific landmark/coordinates. Not a worldwide local address index. |
+| `search_nearby_places` | Google Places first for pharmacy, police, hospital, toilets, cafe or supermarket; up to three within 2.5 km. If unavailable/empty, use pilot OSM cache with explicit fallback warning, snapshot/attribution, restricted-access exclusion and deduplication. Distances are straight-line, not walking times; places are not guaranteed open or able to assist. |
+| `get_place_details` | Only IDs returned by a search in the same turn. Google Details for Google places; cached OSM records for OSM places. Details are not a verification of current availability. |
+| `estimate_walking_access` | Google Routes in `WALK` mode first; directed local walking graph fallback when both points are within cached coverage. Local duration uses 80 m/min and approximate endpoint connectors, not verified entrances/crossings. Neither estimate has a SafeHer score or live ETA. |
+| `plan_supported_trip` | Calls existing Python `plan()` with current report inputs, not an LLM route generator. Returns compact route labels, distance/time, scores/breakdown, reasons, weak stretches and Plan B. Full route geometry/pieces are omitted, but compact weak-stretch/Plan B records can still contain location data. Only the two pilots have scored planning. |
+| `get_plan_b_coverage` | Reads a route computed in the same turn; cannot retrieve another user's private live trip. |
+| `ask_clarification` / `get_emergency_actions` | Fixed prompts or India 112 escalation; no fabricated facts, dispatch, calls or automatic sharing. |
+
+Chat uses `CHATBOT_PROVIDER=ollama` by default with `CHATBOT_MODEL=llama3.2:3b`, ADK `LiteLlm` identifier `ollama_chat/<model>` and `OLLAMA_API_BASE` (default localhost:11434). `CHATBOT_PROVIDER=gemini` selects native ADK Gemini (default `gemini-2.5-flash`); it requires credentials and fresh regression testing. These settings are **separate** from explanation settings `SAFEHER_LLM`/`OLLAMA_MODEL`. There is no automatic cross-provider chat failover or DuckDB/vector database dependency.
+
+Google tools require `GOOGLE_MAPS_API_KEY`, enabled APIs and billing. HTTPS verification remains enabled using the system trust store (`truststore`). Places, Details and walking Routes passed live checks; Geocoding returned a billing/configuration denial in the tested setup. Local resolution and explicit coordinates avoid depending on that unresolved service.
+
+### 6.4 Privacy, limitations and a verified example
+
+- Chat message text, recent dialogue, usable attached coordinates and tool facts reach the configured chat model. Local Ollama avoids a remote model provider, **not** Google Maps calls. Gemini sends that context to its remote provider. Search anchors, addresses and walking endpoints go to relevant Google APIs. Do not tell users that all chat location data stays local.
+- Sharing tokens/latest live GPS are not automatically supplied to chat. Chat's explicit one-shot attachment and continuous foreground sharing have separate consent/lifecycles. No calls, contact notifications or sharing start automatically.
+- Browser chat history/token stay in JavaScript memory, not local/session storage. Closing clears the attachment and pending UI request but retains the in-page conversation. Reload loses local chat state. “Clear this chat” resets browser history/token, **not immediate server deletion**; server context expires independently. Avoid logging chat bodies, credentials, provider URLs/queries or tokens.
+- Multi-turn context exists but is bounded; candidate confirmation, natural-language departure parsing, local-name tool selection and small-model reliability remain incomplete. Fuzzy search tools work independently of whether the model selects them correctly. No unrestricted web Q&A, verified refuge recommendations, nationwide scored routing, emergency dispatch or production authentication/abuse controls.
+- Verified demo question: **“Find the nearest pharmacy to these confirmed coordinates: 28.5433, 77.2067.”** Three consecutive live Ollama runs returned Google Places records; the recorded browser run also succeeded. This is a reproducible smoke-test candidate, not a guarantee of future model/provider output. The [latest video](media/safeher-demo-herside.mp4) includes this real Q&A, model-independent SOS, Plan B and visibly simulated live-sharing GPS.
 
 ## 7. Other user-facing workflows
 
@@ -202,7 +391,7 @@ Source: `sharing.js`, `live.js`, `trips.py`.
 - Stop deletes the session; expiry is purged on database access and periodically (about every minute while running). Closing a tab is not immediate revocation. Offline stop can fail and needs retry.
 - Sender page must remain open; locked/background devices may pause updates. No WebSockets, SMS/contact delivery, arrival detection or native background tracking.
 - Localhost or HTTPS is required for browser GPS. Localhost links work only on the same machine.
-- Sensitive routes/GPS stay out of LLM processing. External tile services can infer the viewed map area. Public deployment needs HTTPS, abuse controls and security review; redact token-bearing paths and bodies from logs.
+- This sharing workflow does not send its stored route, tokens or live GPS to an LLM. Separately, HerSide sends user-provided trip text/usable attached location to its configured model (section 6.4). External tile services can infer the viewed map area. Public deployment needs HTTPS, abuse controls and security review; redact token-bearing paths and bodies from logs.
 
 ### SOS and map controls
 
@@ -219,6 +408,7 @@ Interactive schemas: FastAPI `/docs` or `/openapi.json` when the server is runni
 | GET `/api/search` | Query text, optional area and limit | Local landmark/POI matches; not general geocoding. |
 | POST `/api/plan` | Origin, destination, optional departure | Ranked route JSON, described below. |
 | POST `/api/explain` | Same trip fields + `lang` | Explanation text, provider/model, language and check flag. |
+| POST `/api/chat` | Message, optional session token/location, SOS flag and language | Evidence-rendered reply, intent/urgency, clarification flag, places/routes, actions, warnings, provider and session token. |
 | GET `/api/nearby` | Lat/lon, category, optional time/limit | Places, distance, hours assumptions, optional phone. |
 | GET `/api/layers/{area_id}` | Pilot ID | GeoJSON lamps, police stations and washrooms. |
 | GET `/api/reports` | Optional area | Individual report metadata, excluding notes. |
@@ -244,6 +434,18 @@ Typical planning input:
 - Each route: `label`, `distance_m`, `duration_min`, nullable `score`, `band`, scored `coverage`, signal `breakdown`, `highlights`, `reasons`, `weak_stretches`, `stops`, `geometry`, `pieces`, `plan_b`.
 - `coverage` is scoreable-length coverage; `plan_b.within_threshold_share` is help-access coverage. They are different metrics.
 
+Typical initial chat input (no GPS attachment or previous session needed):
+
+```json
+{
+  "message": "Find the nearest pharmacy to these confirmed coordinates: 28.5433, 77.2067.",
+  "sos": false,
+  "lang": "en"
+}
+```
+
+For follow-ups pass the returned `session_id` as a secret bearer capability. Optional `location` contains `lat`, `lon`, `accuracy_m`, and timezone-aware `observed_at`; `message` must be 1–2000 characters. Chat output contains `session_id`, `reply`, `intent`, `urgency`, `needs_clarification`, `places`, `routes`, `actions`, `warnings`, `provider`. Action contracts include `call`, `request_location`, `show_place`, `open_directions`; the current UI renders allowed call/location actions and its own place/Google Maps controls, not a general arbitrary action executor. An urgent response does not create/refresh a chat session.
+
 **Coordinate convention:** planning geometry/piece coordinates are `[latitude, longitude]`. GeoJSON and trip-session route input use `[longitude, latitude]`. Frontend converts between them; do not copy arrays across APIs without checking order.
 
 ## 9. Implemented vs planned
@@ -258,7 +460,9 @@ Typical planning input:
 | Plan B Coverage | Implemented; estimates independent of score. |
 | VIIRS | Fetch/load code implemented; no current local grids. |
 | H3 spatial cells, hotspot dashboard, five-report privacy threshold | **Planned, not implemented.** Current index is a rectangular lat/lon grid (`PointIndex`, 0.002-degree cells); route sampling is ~50 m, not H3. |
-| General multilingual Q&A and AI moderation | Planned, not implemented. |
+| HerSide local-place/trip Q&A | Initial UI + ADK backend implemented; bounded context, validated tools and evidence rendering. |
+| Hybrid Google/OSM chatbot tools | Implemented; live Places/Details/Routes passed, Geocoding configuration remains open. |
+| General multilingual Q&A and AI moderation | Not implemented; chat API accepts Hindi but full Hindi journey quality is not validated. |
 | Recommendation stability / Privacy Zones | Proposed, not implemented. |
 | Native background GPS, off-route/arrival alerts, automatic contact delivery | Not implemented. |
 | Production authentication/abuse controls and nationwide data coverage | Not implemented. |
@@ -268,7 +472,11 @@ Typical planning input:
 | File | Responsibility |
 |---|---|
 | `backend/safeher/api.py` | App setup, HTTP contracts, search, nearby/layers, reports, explanation orchestration. |
-| `backend/safeher/areas.py` | Pilot geography and timezone configuration. |
+| `backend/safeher/areas.py`, `landmarks.py` | Pilot geography/timezones and curated landmark definitions. |
+| `backend/safeher/chatbot/models.py`, `service.py` | Chat contracts, urgency fast path, location freshness, ephemeral sessions and bounded ADK turns. |
+| `backend/safeher/chatbot/agents.py`, `tools.py` | Supervisor/specialists, model factory, tool guards and evidence-rendered responses. |
+| `backend/safeher/chatbot/maps.py`, `local_data.py` | TLS-verified Google adapter and read-only local search/nearby/walking fallbacks. |
+| `backend/safeher/chatbot/validate.py` | Live model/tool/Places/ADK smoke validator. |
 | `backend/safeher/osm.py`, `fetch.py` | Rebuild OSM snapshots outside request handling. |
 | `backend/safeher/routing.py` | Load/cache graph, indexes, snapping and candidate paths. |
 | `backend/safeher/pois.py`, `geo.py` | POI classification/hours, spatial index, distance/geometry helpers. |
@@ -279,9 +487,10 @@ Typical planning input:
 | `backend/safeher/explain.py` | Facts, prompts, model adapters, checks and fallback. |
 | `backend/safeher/trips.py` | Latest-location session persistence and capabilities. |
 | `app/web/app.js`, `backup.js` | Main UI, API requests and Plan B interactions. |
+| `app/web/chatbot.js`, `chatbot.css`, `index.html` | HerSide modal, one-shot GPS, session handling, source-labelled cards and explicit actions. |
 | `app/web/sharing.js`, `live.html`, `live.js` | Sender and recipient sharing experiences. |
 | `backend/tests/test_*.py` | API, routing, scoring, real-data, explanation, sharing, Plan B and adapter regressions. |
-| `demo/README.md` | Demo recorders, simulated-GPS and cached-map disclosure. |
+| `demo/record_demo.py`, `demo/README.md` | Single current recorder: routes, Plan B, simulated sharing and real HerSide Q&A; cached-map disclosure. |
 
 Checked-in source datasets are under `data/`; runtime reports/trips are under `backend/var/`. Provider settings/secrets are in ignored `backend/.env`, not documentation or source control. Graphs, edge-support and explanation caches are in-process; refreshing datasets generally requires a server restart to avoid old cached data.
 
@@ -298,4 +507,23 @@ From `backend/`, with the existing project environment installed:
 - Latest video: [HerSide Q&A + Plan B + live sharing demo](media/safeher-demo-herside.mp4)
 - Regression suite: `cd backend && ../.venv/bin/python -m pytest -q`
 
-Last recorded feature-validation result: **168 passed, 1 skipped**, plus browser interaction checks for sharing and Plan B. This is historical verification, not a guarantee that every future checkout has been tested. See [README.md](../README.md) for installation and provider configuration.
+### Validation recorded October 16
+
+- Backend/default suite: **215 passed, 7 skipped**. Six skips are the opt-in HerSide browser tests; one is an existing skipped test.
+- HerSide browser suite run separately: **6 passed** (keyboard/Escape/focus, mobile overflow, text-only rendering, actions/errors, explicit one-shot location). Separate execution avoids an observed native macOS subprocess crash after the mixed geospatial/API suite.
+- Live browser: pharmacy query returned three place cards, SOS worked, native modal/Escape worked, and no JavaScript errors were observed.
+- Live tools: Ollama structured calls, ADK delegation, missing-location clarification, Places/Details, walking Routes, pilot planning and SOS passed smoke checks. Local resolver/nearby and forced-outage walking fallbacks were also exercised. These do not establish production reliability.
+- Latest demo: 4:48, real Ollama pharmacy Q&A; MP4 fully decode-validated and visually reviewed. Only the current recorder/video/poster are retained.
+
+```bash
+# From backend/: isolated UI tests using installed Chrome
+RUN_BROWSER_TESTS=1 PLAYWRIGHT_CHANNEL=chrome ../.venv/bin/python -m pytest tests/test_chatbot_ui.py -q
+
+# Live validator: external model/Google calls; requires configured credentials
+../.venv/bin/python -m safeher.chatbot.validate --chat
+
+# From repository root: regenerate the current demo against your running server
+.venv/bin/python demo/record_demo.py --base http://localhost:8765
+```
+
+These are historical validation results, not a claim that tests were rerun for this documentation edit or that every future checkout/provider response will pass. See [README.md](../README.md) and [chatbot setup](../backend/CHATBOT_README.md) for installation and provider configuration.
