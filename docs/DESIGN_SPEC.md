@@ -527,3 +527,4 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 16 Oct 2026 | NCRB incidents looked up per point via OSM district polygons (§8.13) | Corridors can cross police districts; one value per area was wrong for city-wide trips |
 | 16 Oct 2026 | Layers by visible bbox at zoom ≥ 14; search city-wide with neighbourhoods and nearest-first | Whole-city layers would be hundreds of thousands of points |
 | 16 Oct 2026 | Night map shows NASA night-light glow and OSM lit streets alongside mapped lamps (§8.13) | User: lamp dots were very sparse in Bengaluru; few lamps are mapped in OSM |
+| 16 Oct 2026 | Enter in a search box searches the typed text first; late search replies are dropped; browser tests (`tests/test_web_ui.py`, Playwright) | User: changing start/end didn't refresh. Enter picked the stale landmark list shown on focus |

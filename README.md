@@ -62,7 +62,7 @@ Settings live in `config/`: supported cities, landmarks and data sources (`citie
 Route explanations use **Gemini** when `GEMINI_API_KEY=...` is set in `backend/.env` (free key from [Google AI Studio](https://aistudio.google.com/apikey); never commit it). Without a key, a fact-checked template is used. Run the tests with `.venv/bin/pytest`.
 
 ### Tests
-From `backend/`: `.venv/bin/pytest` (unit, API, data integrity, random trips, fuzzing). Heavier runs: `SAFEHER_FUZZ_EXAMPLES=1000 .venv/bin/pytest tests/test_fuzz.py`, `SAFEHER_SEED=<n> SAFEHER_TRIPS=5 .venv/bin/pytest tests/test_random_trips.py`. Load test against a running server: `.venv/bin/python -m tests.tools.load_test --users 40 --seconds 60`.
+From `backend/`: `.venv/bin/pytest` (unit, API, data integrity, random trips, fuzzing, and the web app in headless Chromium; needs `.venv/bin/python -m playwright install chromium` once). Heavier runs: `SAFEHER_FUZZ_EXAMPLES=1000 .venv/bin/pytest tests/test_fuzz.py`, `SAFEHER_SEED=<n> SAFEHER_TRIPS=5 .venv/bin/pytest tests/test_random_trips.py`. Load test against a running server: `.venv/bin/python -m tests.tools.load_test --users 40 --seconds 60`.
 
 ### Record the demo video
 With the server running: `backend/.venv/bin/python -m playwright install chromium` (once), then `backend/.venv/bin/python demo/record_demo.py` → `demo/out/safeher-demo.mp4` (≈2½ min, captioned). Add `--headed` to watch it record.

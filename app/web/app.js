@@ -78,7 +78,12 @@ function toast(msg, ms = 3500) {
   t.textContent = msg; t.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), ms);
 }
-const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+const debounce = (fn, ms) => {
+  let t;
+  const run = (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+  run.cancel = () => clearTimeout(t);
+  return run;
+};
 const isPhone = () => matchMedia("(max-width: 760px)").matches;
 
 /* ---------- map ---------- */
@@ -239,7 +244,8 @@ function setPoint(which, p) {
 
 function setupSearch(inputSel, listSel, which) {
   const input = $(inputSel), list = $(listSel);
-  let items = [], active = -1, empty = "", searchError = "";
+  // `itemsFor` is the text the suggestions belong to; `seq` drops replies for text that has since changed.
+  let items = [], active = -1, empty = "", searchError = "", itemsFor = null, seq = 0;
   const render = () => {
     if (empty && searchError) {
       list.innerHTML = `<li class="suggest-empty">${icon("error")}<div><b>Search failed</b><small>${esc(searchError)}</small></div></li>`;
@@ -258,7 +264,8 @@ function setupSearch(inputSel, listSel, which) {
   };
   let session = null; // Google Autocomplete session: one per search, ended by a Place Details call
   const choose = async (r) => {
-    items = []; empty = ""; render(); input.blur();
+    query.cancel(); seq++; // a pending or in-flight search must not reopen the list
+    items = []; itemsFor = null; empty = ""; render(); input.blur();
     if (r.place_id) {
       try {
         const p = await api(`/api/google/place/${encodeURIComponent(r.place_id)}?session=${session || ""}`);
@@ -270,26 +277,37 @@ function setupSearch(inputSel, listSel, which) {
     planTrip(true);
   };
   const landmarkItems = () => state.city.landmarks.map((l) => ({ ...l, kind: "landmark", detail: `landmark · ${state.city.name}` }));
-  const query = debounce(async () => {
+  const search = async () => {
     const q = input.value.trim();
-    if (!q) { items = landmarkItems(); active = -1; empty = ""; return render(); }
+    const mine = ++seq;
+    if (!q) { items = landmarkItems(); itemsFor = ""; active = -1; empty = ""; return render(); }
     if (googleOn("autocomplete") && !session) session = crypto.randomUUID?.() || String(Date.now());
     const s = googleOn("autocomplete") ? `&session=${session}` : "";
     const c = map ? map.getCenter() : null;
     const near = c ? `&lat=${c.lat.toFixed(5)}&lon=${c.lng.toFixed(5)}` : "";
-    let failed = "";
-    try { items = await api(`/api/search?q=${encodeURIComponent(q)}&city=${state.city.id}${s}${near}`); }
-    catch (err) { items = []; failed = err.message; } // show the error; never pretend there were no matches
+    let found = [], failed = "";
+    try { found = await api(`/api/search?q=${encodeURIComponent(q)}&city=${state.city.id}${s}${near}`); }
+    catch (err) { failed = err.message; } // show the error; never pretend there were no matches
+    if (mine !== seq) return; // the text changed (or a place was chosen) while this was loading
+    items = found; itemsFor = q;
     empty = items.length ? "" : q;
     searchError = failed;
     active = items.length ? 0 : -1; render();
-  }, 120);
-  input.addEventListener("focus", () => { input.select(); items = landmarkItems(); active = -1; empty = ""; render(); });
+  };
+  const query = debounce(search, 120);
+  input.addEventListener("focus", () => { input.select(); items = landmarkItems(); itemsFor = ""; active = -1; empty = ""; render(); });
   input.addEventListener("input", query);
   input.addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown") { active = Math.min(items.length - 1, active + 1); render(); e.preventDefault(); }
     else if (e.key === "ArrowUp") { active = Math.max(0, active - 1); render(); e.preventDefault(); }
-    else if (e.key === "Enter" && items[Math.max(active, 0)]) { choose(items[Math.max(active, 0)]); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      // Enter right after typing: the list may still be for older text (on focus it's the landmarks).
+      // Search for exactly what's typed first, so Enter never picks a place you didn't ask for.
+      const pick = () => items[Math.max(active, 0)] && choose(items[Math.max(active, 0)]);
+      if (itemsFor === input.value.trim()) pick();
+      else { query.cancel(); search().then(() => { if (itemsFor === input.value.trim()) pick(); }); }
+    }
     else if (e.key === "Escape") { items = []; render(); input.blur(); }
   });
   input.addEventListener("blur", () => setTimeout(() => { items = []; empty = ""; render(); if (state[which]) input.value = state[which].name; }, 150));
