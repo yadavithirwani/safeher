@@ -1,6 +1,6 @@
 # SafeHer Companion — backend architecture draft
 
-**Status: initial backend implemented; live-provider validation blocked by network access.** Frontend integration comes later. Working name: **SafeHer Companion**, with an SOS mode. This assistant helps find evidence-backed options; it is not an emergency dispatcher or a guarantee of safety.
+**Status: initial backend implemented; live Ollama/ADK/Places and routing smoke checks passed, with reliability and Geocoding issues remaining.** Frontend integration comes later. Working name: **SafeHer Companion**, with an SOS mode. This assistant helps find evidence-backed options; it is not an emergency dispatcher or a guarantee of safety.
 
 Existing application: [current pipeline](../docs/CURRENT_PIPELINE.md).
 
@@ -212,4 +212,10 @@ Run `cd backend && ../.venv/bin/python -m pytest tests/test_chatbot.py tests/tes
 
 Tests exercise actual ADK Runner transfers/function tools using a scripted model, mocked Google HTTP, emergency handling without a model, session expiry/concurrency, tool budgets, location validation, fallbacks and evidence-only replies. These do not establish real Ollama routing/language quality.
 
-Live verification is currently blocked: model download failed DNS resolution directly, and the corporate proxy returned HTTP 407. Existing `llama3:latest` rejected a tool-call probe (HTTP 400). The Google Places probe failed at transport level; key validity, enabled APIs and billing remain unverified. Complete an actual Ollama → ADK → Google search before calling this live-provider validated.
+Live validation update (October 16): `llama3.2:3b` is installed and passed structured tool calling. Real ADK delegation, missing-location clarification, pharmacy search using Google Places, and pre-trip planning returning three SafeHer routes have passed smoke checks. Direct Google Place Details and walking Routes requests also passed. Google Geocoding returned `REQUEST_DENIED` with a billing-related diagnostic; its Cloud configuration still needs attention.
+
+The Maps HTTP client now uses `truststore` to validate certificates against system trust, resolving the previous Python certificate failure without disabling TLS verification. Numeric-string model coordinates are normalized; null/nonfinite arguments return clarification rather than crashing.
+
+Reliability is **not established**: repeated pharmacy trials included a clarification-only result despite supplied coordinates. Small-model routing/tool-call omissions still need work; one passing run is not acceptance of every flow. Normal response rendering and conversational limitations above still apply.
+
+Repeat prerequisite and live agent checks with `cd backend && ../.venv/bin/python -m safeher.chatbot.validate --chat`. This calls real Maps APIs and may incur charges. It never counts cached OSM fallback as a Google success. Current full regression result: **205 passed, 1 skipped**.

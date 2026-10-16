@@ -101,7 +101,9 @@ class ChatService:
             response = render_evidence(evidence)
             response.intent = observed.get("turn:intent", response.intent)
             if not evidence:
-                topic = observed.get("turn:clarification", "scope")
+                default_topic = {"local_enquiry": "location", "during_trip": "location",
+                                 "pre_trip": "origin"}.get(response.intent, "scope")
+                topic = observed.get("turn:clarification", default_topic)
                 response.reply = QUESTIONS.get(topic, QUESTIONS["scope"])
                 response.needs_clarification = True
             if observed.get("turn:budget_exceeded"):

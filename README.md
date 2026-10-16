@@ -12,7 +12,7 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 
 ## Companion chatbot backend
 
-Initial Google ADK supervisor/specialist agents and `POST /api/chat` are implemented, with Ollama configuration, Google Maps tools and a model-independent SOS response. **Live model/Maps validation is currently blocked by network access.** Setup, tests and limitations: [backend/CHATBOT_README.md](backend/CHATBOT_README.md). Frontend integration comes later.
+Initial Google ADK supervisor/specialist agents and `POST /api/chat` are implemented, with Ollama configuration, Google Maps tools and a model-independent SOS response. **Live Ollama/ADK/Places smoke checks have passed; model reliability and Geocoding configuration still need work.** Setup, tests and limitations: [backend/CHATBOT_README.md](backend/CHATBOT_README.md). Frontend integration comes later.
 
 ## Demo
 

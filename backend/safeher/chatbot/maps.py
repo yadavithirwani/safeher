@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import os
 import re
+import ssl
+
+import truststore
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -32,7 +35,8 @@ class MapsClient:
         if mask:
             headers["X-Goog-FieldMask"] = mask
         try:
-            async with httpx.AsyncClient(timeout=8, transport=self.transport) as client:
+            async with httpx.AsyncClient(timeout=8, transport=self.transport,
+                                         verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)) as client:
                 response = await client.request(method, url, headers=headers, json=body, params=params)
                 if response.status_code != 200:
                     raise MapsUnavailable(f"maps_http_{response.status_code}")

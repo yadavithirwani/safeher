@@ -77,3 +77,26 @@ def test_locked_session_is_rejected_without_waiting():
                 await service.chat(ChatRequest(message="hello", session_id=token))
             assert error.value.status_code == 409
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('value', [None, True, 'invalid', float('nan'), float('inf')])
+def test_bad_model_coordinates_are_rejected(value):
+    context = SimpleNamespace(state={})
+    assert agents.budget(SimpleNamespace(name='search_nearby_places'),
+                         {'lat': value, 'lon': 77}, context)['error']
+    assert context.state['turn:clarification'] == 'location'
+
+
+def test_numeric_model_coordinates_are_normalized():
+    context = SimpleNamespace(state={})
+    args = {'lat': '28.5433', 'lon': '77.2067'}
+    assert agents.budget(SimpleNamespace(name='search_nearby_places'), args, context) is None
+    assert args == {'lat': 28.5433, 'lon': 77.2067}
+
+
+def test_specialist_without_tool_output_gets_relevant_clarification(monkeypatch):
+    service = scripted_service(monkeypatch, [
+        ('transfer_to_agent', {'agent_name': 'local_enquiry'}), 'Please provide your location.'])
+    result = asyncio.run(service.chat(ChatRequest(message='nearest pharmacy?')))
+    assert result.needs_clarification
+    assert 'which location' in result.reply
