@@ -84,3 +84,16 @@ def test_deer_park_darker_than_aurobindo_marg():
     aurobindo_marg = g.radiance_at(28.5434, 77.2066)  # outside Hauz Khas metro
     assert deer_park is not None and aurobindo_marg is not None
     assert deer_park < aurobindo_marg
+
+
+def test_trip_corridor_uses_its_citys_grid(tmp_path, monkeypatch):
+    """Trip areas inside a pre-loaded city get the whole-city night-light grid (city-relative ranks)."""
+    from safeher import citydata, viirs
+    from safeher.areas import Area
+    monkeypatch.setattr(citydata, "OUTPUT_DIR", tmp_path)
+    grid = ViirsGrid(np.array([[10.0, 50.0], [90.0, 30.0]]), np.array([28.55, 28.54]), np.array([77.20, 77.21]), 2025)
+    grid.save(viirs.city_grid_path("delhi"))
+    inside = Area("trip-0123456789", "Trip area", "t", 28.53, 77.19, 28.56, 77.22, "Asia/Kolkata")
+    outside = Area("trip-9876543210", "Trip area", "t", 19.0, 72.8, 19.1, 72.9, "Asia/Kolkata")
+    assert viirs.load_for(inside).radiance_at(28.54, 77.20) == 90.0
+    assert viirs.load_for(outside) is None

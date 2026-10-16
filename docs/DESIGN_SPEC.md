@@ -367,8 +367,11 @@ Rebuild with `python -m safeher.fetch` (from `backend/`). Snapshots are committe
 - **Use:** a trip corridor inside a built city is cut from DuckDB (opened read-only, so all workers share it), simplified with OSMnx and saved in the normal area format. **Toit → Koramangala: ready in 2.5 s** (was > 10 min via Overpass). Route lengths match the Overpass-built network exactly (2,955 / 3,200 / 2,838 m for Hauz Khas → Saket). Outside the two cities, the on-demand Overpass download still applies.
 - **Known gap:** trip corridors don't map to an NCRB district, so their incidents signal is "no data" (weight redistributed).
 
-### 8.12 NASA night lights: blocked on a licence acceptance
-LAADS lists the 2025 VNP46A4 tiles for the token, but a file request with the token redirects to `/profiles/licenses/…` and then to the Earthdata login, so the account must accept the dataset licence once in a browser. Until then the lighting fallback stays OSM tags → lamps → road type.
+### 8.12 NASA night lights (live since 16 Oct 2026)
+- Black Marble **VNP46A4 2025** (yearly, ~500 m) downloaded with the Earthdata token after accepting the LAADS data licence once in a browser (the token alone was redirected to the licence page).
+- Grids: the two demo areas (`data/areas/<id>/viirs.npz`, committed) and **whole cities** (`data/cities/<id>_viirs.npz`, gitignored; `python -m safeher.viirs cities`): Delhi 125×118 px, Bengaluru 79×77 px. Trip corridors use their city's grid, so brightness is ranked city-wide.
+- Checks: Hauz Khas Deer Park (radiance 38.5, 11th percentile) is darker than Aurobindo Marg at Hauz Khas Metro (54.6, 52nd) and Select Citywalk (75.7, 97th). Jahanpanah City Forest reads 65th percentile: 500 m pixels blend a forest edge with nearby roads, which is why VIIRS never overrides street-level data.
+- Effect at 9:30 pm: Delhi demo trip 81/70/68 → 84/75/73 (lighting confidence 0.27 → 0.45); Bengaluru 93/89/74 → 94/93/75. Ranking unchanged.
 
 ## 9. Architecture (Google stack)
 
@@ -503,3 +506,4 @@ BigQuery: `segments`, `segment_static_scores`, `incident_cells`, `report_aggrega
 | 16 Oct 2026 | Pre-load full Delhi and Bengaluru from Geofabrik into DuckDB; cut trip corridors locally (§8.11) | Overpass on demand took 6–10+ min; DuckDB suits large read-only city tables shared by all workers |
 | 16 Oct 2026 | Place-name guardrail ignores names inside places that are in the facts, and matches whole words | Real Gemini answer naming "Indiranagar Traffic Police Station" was rejected because another place is called "Indiranagar" |
 | 16 Oct 2026 | Status files written via unique temp names | Shared temp file caused spurious "download failed" under concurrency |
+| 16 Oct 2026 | NASA night lights live for demo areas and whole cities; trip corridors use the city grid (§8.12) | Delhi lighting was almost entirely a road-type guess |

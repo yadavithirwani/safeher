@@ -75,9 +75,25 @@ class ViirsGrid:
         return cls(z["radiance"].astype(float), z["lats"], z["lons"], int(z["year"]))
 
 
+def city_grid_path(city_id: str) -> Path:
+    from .citydata import OUTPUT_DIR
+    return OUTPUT_DIR / f"{city_id}_viirs.npz"
+
+
 def load_for(area: Area) -> ViirsGrid | None:
+    """The area's own grid, else the grid of a pre-loaded city that contains the area (trip corridors).
+    A city grid ranks brightness against the whole city, matching the spec's city-relative rule."""
     p = grid_path(area)
-    return ViirsGrid.load(p) if p.exists() else None
+    if p.exists():
+        return ViirsGrid.load(p)
+    from .citydata import CITIES
+    for c in CITIES.values():
+        b = c["bbox"]
+        if b["south"] <= area.south and b["west"] <= area.west and area.north <= b["north"] and area.east <= b["east"]:
+            cp = city_grid_path(c["id"])
+            if cp.exists():
+                return ViirsGrid.load(cp)
+    return None
 
 
 # --- Fetching -------------------------------------------------------------------------------
@@ -94,11 +110,15 @@ def _token() -> str:
 
 
 def fetch(area: Area, year: int = DEFAULT_YEAR) -> ViirsGrid:
+    return fetch_bbox(area.south, area.west, area.north, area.east, grid_path(area), year)
+
+
+def fetch_bbox(south: float, west: float, north: float, east: float, out: Path, year: int = DEFAULT_YEAR) -> ViirsGrid:
     import geopandas as gpd
     from blackmarble import BlackMarble
     from shapely.geometry import box
 
-    roi = gpd.GeoDataFrame(geometry=[box(area.west, area.south, area.east, area.north)], crs="EPSG:4326")
+    roi = gpd.GeoDataFrame(geometry=[box(west, south, east, north)], crs="EPSG:4326")
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     bm = BlackMarble(token=_token(), output_directory=RAW_DIR)
     ds = bm.raster(roi, product_id=PRODUCT, date_range=date(year, 1, 1))
@@ -108,14 +128,24 @@ def fetch(area: Area, year: int = DEFAULT_YEAR) -> ViirsGrid:
     lon_name = next(d for d in da.dims if d in ("x", "lon", "longitude"))
     da = da.transpose(lat_name, lon_name).sortby(lon_name)
     grid = ViirsGrid(da.values.astype(float), da[lat_name].values, da[lon_name].values, year)
-    grid.save(grid_path(area))
+    grid.save(out)
     return grid
 
 
+def _summary(name: str, g: ViirsGrid, out: Path) -> str:
+    finite = g.radiance[np.isfinite(g.radiance)]
+    return (f"{name}: {g.radiance.shape} pixels, radiance min/median/max "
+            f"{finite.min():.1f}/{np.median(finite):.1f}/{finite.max():.1f} → {out}")
+
+
 if __name__ == "__main__":
-    ids = sys.argv[1:] or list(AREAS)
-    for area_id in ids:
-        g = fetch(AREAS[area_id])
-        finite = g.radiance[np.isfinite(g.radiance)]
-        print(f"{area_id}: {g.radiance.shape} pixels, radiance min/median/max "
-              f"{finite.min():.1f}/{np.median(finite):.1f}/{finite.max():.1f} → {grid_path(AREAS[area_id])}")
+    args = sys.argv[1:]
+    if args[:1] == ["cities"]:  # whole pre-loaded cities (config/cities.json)
+        from .citydata import CITIES
+        for cid in args[1:] or list(CITIES):
+            b = CITIES[cid]["bbox"]
+            out = city_grid_path(cid)
+            print(_summary(cid, fetch_bbox(b["south"], b["west"], b["north"], b["east"], out), out))
+    else:
+        for area_id in args or list(AREAS):
+            print(_summary(area_id, fetch(AREAS[area_id]), grid_path(AREAS[area_id])))
