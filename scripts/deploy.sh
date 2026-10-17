@@ -15,6 +15,8 @@ REGION="asia-south1"                    # Mumbai: closest to Delhi and Bengaluru
 SERVICE="safeher-api"
 SA_NAME="safeher-api"
 SA="$SA_NAME@$PROJECT.iam.gserviceaccount.com"
+BUILD_SA_NAME="safeher-build"            # Cloud Build's identity (new organizations give the default one no rights)
+BUILD_SA="$BUILD_SA_NAME@$PROJECT.iam.gserviceaccount.com"
 SECRET="safeher-maps-key"
 GCLOUD="$(command -v gcloud || echo "$HOME/google-cloud-sdk/bin/gcloud")"
 FIREBASE="$(command -v firebase || echo firebase)"
@@ -23,6 +25,15 @@ APP_ONLY=false; [[ "${1:-}" == "--app" ]] && APP_ONLY=true
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 ask()  { $APP_ONLY && return 1; read -r -p "$* [y/N] " a; [[ "$a" == [yY]* ]]; }
 gc()   { "$GCLOUD" --project="$PROJECT" --quiet "$@"; }
+grant() {  # grant ROLE to service account MEMBER; a new account takes seconds to be visible, so retry ~1 min
+  local member="$1" role="$2" try
+  for try in 1 2 3 4 5 6; do
+    if gc projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$member" --role="$role" \
+         --condition=None >/dev/null 2>/tmp/safeher-iam.err; then echo "  granted $role to ${member%%@*}"; return 0; fi
+    grep -q "does not exist" /tmp/safeher-iam.err && [[ $try -lt 6 ]] || { cat /tmp/safeher-iam.err; exit 1; }
+    echo "  waiting for the new service account to be visible..."; sleep 10
+  done
+}
 
 # --- Checks -------------------------------------------------------------------------------------
 [[ -x "$GCLOUD" ]] || { echo "gcloud not found (install the Google Cloud SDK)"; exit 1; }
@@ -56,15 +67,22 @@ if ! $APP_ONLY; then
     fi
   fi
   if ask "    Give it Vertex AI User and Cloud Datastore User (Firestore)?"; then
-    for role in roles/aiplatform.user roles/datastore.user; do
-      gc projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$SA" --role="$role" --condition=None >/dev/null
-      echo "  granted $role"
-    done
+    for role in roles/aiplatform.user roles/datastore.user; do grant "$SA" "$role"; done
+  fi
+  if ! gc iam service-accounts describe "$BUILD_SA" >/dev/null 2>&1; then
+    if ask "    Create service account $BUILD_SA for Cloud Build (read uploaded source, write the image and logs)?"; then
+      gc iam service-accounts create "$BUILD_SA_NAME" --display-name="SafeHer container builds"
+    fi
+  fi
+  if ask "    Give the build account Storage Object Viewer, Artifact Registry Writer and Logs Writer?"; then
+    for role in roles/storage.objectViewer roles/artifactregistry.writer roles/logging.logWriter; do grant "$BUILD_SA" "$role"; done
   fi
 
   # --- 4. Google Maps key -> Secret Manager (never printed) ------------------------------------
   KEY="$(grep -E '^GOOGLE_MAPS_API_KEY=' backend/.env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'"'"' \r' || true)"
-  if [[ -n "$KEY" ]] && ask "4/6 Store the Google Maps key from backend/.env in Secret Manager as '$SECRET'?"; then
+  if gc secrets describe "$SECRET" >/dev/null 2>&1 && [[ "${SAFEHER_ROTATE_KEY:-}" != 1 ]]; then
+    echo "Maps key already in Secret Manager (SAFEHER_ROTATE_KEY=1 to store a new one)."
+  elif [[ -n "$KEY" ]] && ask "4/6 Store the Google Maps key from backend/.env in Secret Manager as '$SECRET'?"; then
     gc secrets describe "$SECRET" >/dev/null 2>&1 || gc secrets create "$SECRET" --replication-policy=automatic
     printf '%s' "$KEY" | gc secrets versions add "$SECRET" --data-file=- >/dev/null
     gc secrets add-iam-policy-binding "$SECRET" --member="serviceAccount:$SA" --role=roles/secretmanager.secretAccessor >/dev/null
@@ -78,7 +96,8 @@ SECRETS_FLAG=()
 gc secrets describe "$SECRET" >/dev/null 2>&1 && SECRETS_FLAG=(--set-secrets="GOOGLE_MAPS_API_KEY=$SECRET:latest")
 if $APP_ONLY || ask "5/6 Build and deploy the API to Cloud Run (min 0 instances = no cost when idle, max 2)?"; then
   gc run deploy "$SERVICE" --source . --region="$REGION" \
-    --service-account="$SA" --allow-unauthenticated \
+    --service-account="$SA" --build-service-account="projects/$PROJECT/serviceAccounts/$BUILD_SA" \
+    --allow-unauthenticated \
     --cpu=1 --memory=1Gi --cpu-throttling --cpu-boost \
     --min-instances=0 --max-instances=2 --concurrency=20 --timeout=120 \
     --set-env-vars="SAFEHER_USERDB=firestore,GOOGLE_CLOUD_PROJECT=$PROJECT,GOOGLE_CLOUD_LOCATION=global,CHATBOT_PROVIDER=gemini,SAFEHER_CORRIDOR_CACHE=8" \
@@ -95,7 +114,7 @@ fi
 # --- 6. Firebase Hosting: the web app, with /api/** routed to Cloud Run ------------------------
 if $APP_ONLY || ask "6/6 Deploy the web app to Firebase Hosting?"; then
   scripts/build_hosting.sh
-  "$FIREBASE" deploy --only hosting --project "$PROJECT"
+  "$FIREBASE" deploy --only hosting --project "$PROJECT" --non-interactive
 fi
 
 say "Done. Web app: https://$PROJECT.web.app  (API wakes on the first request, sleeps when idle)"
