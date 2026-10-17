@@ -59,7 +59,24 @@ Everything city- or model-specific lives in `config/`, not in code:
 - `scoring.json`: the published scoring model (weights, thresholds, routing limits).
 - `app.json`: app defaults (default city, departure time, trip limits, helplines, basemaps, languages).
 
-Secrets and machine settings go in `backend/.env` (see [`.env.example`](backend/.env.example)).
+Secrets and machine settings go in `backend/.env`. Every variable is documented in [`.env.example`](backend/.env.example).
+
+### External dependencies
+Everything SafeHer relies on outside this repo and `backend/.env`:
+
+| When | Dependency | Account / cost | If it's missing |
+|---|---|---|---|
+| Data build | Geofabrik OSM extracts, India Data Portal (NCRB), OpenCity (Bengaluru police) | none, free | build fails; the old database is kept |
+| Data build | NASA Earthdata / LAADS (Black Marble) | free account + token (expires every 60 days) + licence accepted once | build fails |
+| Data build | Python packages `osmium`, `blackmarblepy` (`.[build]` extra) | none | build fails |
+| Runtime | `data/safeher.duckdb`: built locally, gitignored, baked into the Cloud Run image | none | app won't start; rebuild it |
+| Runtime, browser | MapLibre GL 5 (jsDelivr CDN), CARTO basemap styles | none | no map tiles |
+| Runtime, optional | Google Maps Platform: Map Tiles, Places (New), Routes, Street View Static, Geocoding | Cloud project with billing | open-data basemap and search |
+| Runtime, optional | Vertex AI, Gemini 2.5 Flash / Flash-Lite (explanations, HerSide, scope check, Maps grounding) | Cloud project with billing; shared API key or ADC | template explanation; HerSide on Ollama |
+| Runtime, optional | Ollama (`llama3.2:3b`) for a local HerSide | none, runs on your computer | HerSide unavailable without Gemini |
+| Deploy | Google Cloud project `safeher-511808`: Cloud Run, Cloud Build, Artifact Registry, Firestore, Secret Manager, IAM, Firebase Hosting | trial billing account; `gcloud` and `firebase` CLIs signed in | see [docs/DEPLOY.md](docs/DEPLOY.md) |
+| Deploy | Org policy `iam.managed.disableServiceAccountApiKeyCreation` turned off for the project (to create the Vertex key) | org policy admin | the Vertex API key can't be created |
+| Tests | Playwright Chromium (`playwright install chromium`) | none | the web UI tests skip or fail |
 
 ## How it works
 
