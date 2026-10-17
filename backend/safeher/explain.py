@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -24,6 +25,8 @@ from pathlib import Path
 import httpx
 
 from . import config
+
+log = logging.getLogger(__name__)
 
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 LANGUAGES = {k: v["name"] for k, v in config.app()["languages"].items()}
@@ -117,6 +120,10 @@ def allowed_numbers(facts: dict) -> set[float]:
             nums.add(round(abs(a["minutes"] - b["minutes"]), 1))
             if a["score"] is not None and b["score"] is not None:
                 nums.add(round(abs(a["score"] - b["score"]), 1))
+            for name, sa in a["signals"].items():  # "open places nearby 91 vs 72, 19 points more"
+                sb = b["signals"].get(name)
+                if sb and sa["value"] is not None and sb["value"] is not None:
+                    nums.add(round(abs(sa["value"] - sb["value"]), 1))
     h, m = (int(x) for x in facts["departure_local_time"].split(":"))
     nums |= {float(h), float(m), float((h + 11) % 12 + 1)}  # 21:30 → 21, 30, 9
     nums |= {100.0, 112.0}  # "out of 100"; the emergency number
@@ -442,6 +449,8 @@ def explain(plan: dict, lang: str = "en", forbidden_names: set[str] = frozenset(
                 raise ExplainFailed(f"{name.capitalize()} failed: {e}") from e
             verdict = check(text, facts, lang, forbidden_names)
             attempts.append({"provider": name, "ok": verdict.ok, "problems": verdict.problems})
+            if not verdict.ok:  # route facts only (no location or user data), so the rejected text can be logged
+                log.warning("%s explanation rejected (%s): %r", name, "; ".join(verdict.problems), text)
             if verdict.ok:
                 result = {"text": text, "provider": name, "model": model}
                 break
