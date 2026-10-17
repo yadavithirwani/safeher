@@ -14,7 +14,7 @@ Browser ──► Firebase Hosting (static web app, free) ──/api/**──►
 | Cloud Run | min **0** instances, max **2**, 1 vCPU, 1 GiB, CPU only during requests, startup boost | Scales to zero when idle. A cold start takes about 5–10 s, and the app shows "Starting up…". One process peaks around 600 MB. |
 | Reference data | `data/safeher.duckdb` (145 MB) inside the container | No database server to pay for. To update it, rebuild the data locally and redeploy. |
 | User data | Firestore (Native, asia-south1), with a TTL on `trips.expire_at` | Cloud Run's disk is wiped when it scales down. Free tier: 1 GiB stored, 50k reads and 20k writes per day. |
-| Gemini / Maps grounding | Service account `safeher-api@…` with *Vertex AI User* | ADC on Cloud Run: no key stored. |
+| Gemini / Maps grounding | Service account `safeher-api@…` with *Vertex AI User* | ADC on Cloud Run: no key stored. Teammates running locally can use the shared `VERTEX_API_KEY` instead (see below). |
 | Google Maps key | Secret Manager `safeher-maps-key`, read only by the service account | Not in the image or any file. |
 | Images | Artifact Registry keeps the 2 newest | Storage stays at about 1–2 GB, roughly $0.10/month. |
 | Crawlers | `robots.txt` disallows `/api/` and `/live` | Bots don't wake the server. |
@@ -42,6 +42,16 @@ Browser ──► Firebase Hosting (static web app, free) ──/api/**──►
 
    It prints the app's address: `https://safeher-511808.web.app`.
 6. **Optional:** restrict the Maps key. In Cloud console, go to *APIs & Services*, then *Credentials*, and restrict it to the Maps APIs SafeHer uses: Map Tiles, Places (New), Routes, Street View Static and Geocoding. Don't add a website restriction: the server calls Maps itself, without a browser referrer.
+
+## Sharing Gemini with teammates (Vertex AI API key)
+
+AI Studio Gemini keys can no longer use Gemini 2.5, so the team shares a **Vertex AI** API key instead, which is billed to this project:
+1. In Cloud console, open **Vertex AI → API keys** (or [Express mode](https://console.cloud.google.com/expressmode)) for `safeher-511808`, and create a key linked to the trial billing account.
+2. Restrict it to the **Vertex AI API** (*APIs & Services → Credentials → the key → API restrictions*).
+3. Share it privately, never in Git or a chat log. Each person puts `VERTEX_API_KEY=…` in their own `backend/.env`.
+4. Rotate it (create a new key and delete the old one) when the team changes or the hackathon ends.
+
+The deployed server keeps using its service account (ADC) and doesn't need the key.
 
 ## Updating
 

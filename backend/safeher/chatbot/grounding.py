@@ -12,7 +12,7 @@ import asyncio
 import httpx
 
 from .. import config
-from ..explain import BANNED, ProviderUnavailable, _env, gemini_model, thinking, vertex_headers
+from ..explain import BANNED, VERTEX_KEY_URL, ProviderUnavailable, _env, gemini_model, thinking, vertex_api_key, vertex_headers
 
 CFG = config.app()["maps_grounding"]
 URL = ("https://aiplatform.googleapis.com/v1beta1/projects/{project}/locations/global/publishers/google/"
@@ -69,10 +69,10 @@ async def ask(question: str, near: tuple[float, float] | None, transport=None) -
 
 
 async def _ask(question: str, near: tuple[float, float] | None, transport, system: str) -> dict:
-    project = _env("GOOGLE_CLOUD_PROJECT")
-    if not project:
-        raise NotConfigured("Google Maps grounding needs GOOGLE_CLOUD_PROJECT (Vertex AI).")
-    headers = await asyncio.to_thread(vertex_headers, project)
+    key, project = vertex_api_key(), _env("GOOGLE_CLOUD_PROJECT")
+    if not key and not project:
+        raise NotConfigured("Google Maps grounding needs Vertex AI: VERTEX_API_KEY or GOOGLE_CLOUD_PROJECT.")
+    headers = {"x-goog-api-key": key} if key else await asyncio.to_thread(vertex_headers, project)
     body = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": question}]}],
@@ -85,7 +85,9 @@ async def _ask(question: str, near: tuple[float, float] | None, transport, syste
     if near:
         retrieval["latLng"] = {"latitude": near[0], "longitude": near[1]}
     body["toolConfig"] = {"retrievalConfig": retrieval}
-    url = URL.format(project=project, model=gemini_model(_env("MAPS_GROUNDING_MODEL", CFG["model"])))
+    model = gemini_model(_env("MAPS_GROUNDING_MODEL", CFG["model"]))
+    url = (VERTEX_KEY_URL.format(version="v1beta1", model=model) if key
+           else URL.format(project=project, model=model))
     try:
         async with httpx.AsyncClient(timeout=float(CFG["timeout_s"]), transport=transport) as client:
             r = await client.post(url, json=body, headers=headers)

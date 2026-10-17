@@ -81,3 +81,16 @@ def test_tool_failure_is_shown_not_hidden(vertex, monkeypatch):
     ctx = SimpleNamespace(state={})
     asyncio.run(tools.ask_google_maps("cafes open late?", ctx))
     assert "HTTP 429" in tools.render_evidence(ctx.state["turn:evidence"]).reply
+
+
+
+def test_grounding_with_a_shared_vertex_key(monkeypatch):
+    import asyncio as _a
+    monkeypatch.setenv("VERTEX_API_KEY", "vk")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "")
+    seen = []
+    _a.run(grounding.ask("cafes open late?", (28.54, 77.21), transport(seen)))
+    req = seen[0]
+    assert str(req.url) == ("https://aiplatform.googleapis.com/v1beta1/publishers/google/models/"
+                            "gemini-2.5-flash:generateContent")
+    assert req.headers["x-goog-api-key"] == "vk" and "authorization" not in req.headers

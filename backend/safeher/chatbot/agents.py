@@ -29,18 +29,31 @@ If the user's intent changes, transfer to the supervisor or the relevant peer.
 """
 
 
+def _vertex_key() -> str:
+    return (os.getenv("VERTEX_API_KEY") or "").strip()
+
+
 def describe() -> dict:
     """Which model answers HerSide, for the UI badge (no side effects)."""
-    choice = os.getenv("CHATBOT_PROVIDER") or ("gemini" if os.getenv("GOOGLE_CLOUD_PROJECT") else "ollama")
+    vertex = bool(_vertex_key() or os.getenv("GOOGLE_CLOUD_PROJECT"))
+    choice = os.getenv("CHATBOT_PROVIDER") or ("gemini" if vertex else "ollama")
     if choice == "gemini":
         return {"provider": "gemini", "model": os.getenv("CHATBOT_MODEL", "gemini-2.5-flash"),
-                "platform": "Vertex AI" if os.getenv("GOOGLE_CLOUD_PROJECT") else "Gemini API"}
+                "platform": "Vertex AI" if vertex else "Gemini API"}
     return {"provider": "ollama", "model": os.getenv("CHATBOT_MODEL", "llama3.2:3b"), "platform": "on this computer"}
 
 
 def model():
     # Default: Gemini on Vertex AI when a Cloud project is configured (ADC), else local Ollama.
-    choice = os.getenv("CHATBOT_PROVIDER") or ("gemini" if os.getenv("GOOGLE_CLOUD_PROJECT") else "ollama")
+    choice = os.getenv("CHATBOT_PROVIDER") or ("gemini" if (_vertex_key() or os.getenv("GOOGLE_CLOUD_PROJECT")) else "ollama")
+    if choice == "gemini" and _vertex_key():
+        # A shared Vertex AI API key: pass an explicit client, because from environment variables alone
+        # google-genai prefers a project login over a key.
+        from google.adk.models import Gemini
+        from google.genai import Client
+        from ..explain import gemini_model
+        return Gemini(model=gemini_model(os.getenv("CHATBOT_MODEL", "gemini-2.5-flash")),
+                      client=Client(vertexai=True, api_key=_vertex_key()))
     if choice == "gemini":
         if os.getenv("GOOGLE_CLOUD_PROJECT"):
             # google-genai (used by ADK) reads these: Vertex AI with Application Default Credentials.
