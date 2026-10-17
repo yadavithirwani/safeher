@@ -60,6 +60,15 @@ def test_invented_number_rejected(facts):
     assert any(f"number not in the data: {invented}" in p for p in r.problems)
 
 
+def test_signal_difference_between_routes_allowed(facts):
+    best = facts["routes"][0]
+    short = next(r for r in facts["routes"] if r["label"] == "Shortest")
+    name = max(best["signals"], key=lambda k: abs((best["signals"][k]["value"] or 0) - (short["signals"][k]["value"] or 0)))
+    gap = abs(best["signals"][name]["value"] - short["signals"][name]["value"])
+    assert gap and float(gap) in ex.allowed_numbers(facts)
+    assert ex.check(good_text(facts) + f" Its {name} score is {gap} points higher.", facts, "en").ok
+
+
 def test_must_state_both_scores(facts):
     r = ex.check("The recommended route has more places open nearby and better lighting data overall.", facts, "en")
     assert sum("doesn't state" in p for p in r.problems) == 2
