@@ -6,7 +6,6 @@ import json
 import math
 import secrets
 import time
-from contextlib import contextmanager
 
 from fastapi import APIRouter, Header, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
@@ -36,20 +35,12 @@ class TripRequest(BaseModel):
         return route
 
 
-@contextmanager
-def database():
-    """A user-database transaction (see userdb.py) that first drops expired trips."""
-    with userdb.database() as tx:
-        tx.execute("DELETE FROM trips WHERE expires <= ?", (time.time(),))
-        yield tx
-
-
 def digest(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def find(conn, token):
-    row = conn.execute("SELECT * FROM trips WHERE viewer = ?", (digest(token),)).fetchone()
+def find(token):
+    row = userdb.trip_get(digest(token))
     if row is None:
         raise HTTPException(404, "Sharing stopped, expired, or link unavailable.")
     return row
@@ -66,19 +57,15 @@ def authorize(row, authorization):
 def create_trip(req: TripRequest, response: Response):
     viewer, owner = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     expires = time.time() + TTL
-    with database() as conn:
-        if conn.execute("SELECT count(*) FROM trips").fetchone()[0] >= 1000:
-            raise HTTPException(503, "Sharing capacity reached. Try again later.")
-        conn.execute("INSERT INTO trips(viewer, owner_hash, expires, route) VALUES (?, ?, ?, ?)",
-                     (digest(viewer), digest(owner), expires, json.dumps(req.route)))
+    if not userdb.trip_create(digest(viewer), digest(owner), expires, req.route):
+        raise HTTPException(503, "Sharing capacity reached. Try again later.")
     response.headers["Cache-Control"] = "no-store"
     return {"viewer_token": viewer, "owner_token": owner, "expires_at": expires}
 
 
 @router.get("/{token}")
 def read_trip(token: str, response: Response):
-    with database() as conn:
-        row = find(conn, token)
+    row = find(token)
     response.headers["Cache-Control"] = "no-store"
     return {"expires_at": row["expires"], "route": json.loads(row["route"]),
             "location": None if row["updated"] is None else {
@@ -88,22 +75,18 @@ def read_trip(token: str, response: Response):
 
 @router.put("/{token}/location", status_code=204)
 def update_location(token: str, req: Location, authorization: str | None = Header(default=None)):
-    with database() as conn:
-        row = find(conn, token)
-        authorize(row, authorization)
-        conn.execute("UPDATE trips SET lat=?, lon=?, accuracy=?, updated=? WHERE viewer=?",
-                     (req.lat, req.lon, req.accuracy_m, time.time(), digest(token)))
+    row = find(token)
+    authorize(row, authorization)
+    userdb.trip_set_location(digest(token), req.lat, req.lon, req.accuracy_m)
 
 
 @router.delete("/{token}", status_code=204)
 def stop_trip(token: str, authorization: str | None = Header(default=None)):
-    with database() as conn:
-        row = find(conn, token)
-        authorize(row, authorization)
-        conn.execute("DELETE FROM trips WHERE viewer=?", (digest(token),))
+    row = find(token)
+    authorize(row, authorization)
+    userdb.trip_delete(digest(token))
 
 
 def purge_expired():
     """Called periodically, even if nobody opens an expired link."""
-    with database():
-        pass
+    userdb.purge_expired_trips()

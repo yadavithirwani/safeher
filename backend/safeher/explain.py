@@ -258,6 +258,16 @@ def _vertex_token() -> str:
     return _adc.token
 
 
+def vertex_headers(project: str) -> dict:
+    """Bearer token from ADC. A person's login (gcloud on a laptop) also names the project to bill;
+    a service account (Cloud Run) bills its own project, and the header would need an extra role."""
+    headers = {"Authorization": f"Bearer {_vertex_token()}"}
+    from google.oauth2.credentials import Credentials as UserCredentials
+    if isinstance(_adc, UserCredentials):
+        headers["x-goog-user-project"] = project
+    return headers
+
+
 def gemini_target(model: str) -> tuple[str, dict]:
     """Where to send a Gemini request: Vertex AI with ADC when GOOGLE_CLOUD_PROJECT is set, else the
     Gemini API with GEMINI_API_KEY. Neither set: the feature is off."""
@@ -266,7 +276,7 @@ def gemini_target(model: str) -> tuple[str, dict]:
         location = _env("GOOGLE_CLOUD_LOCATION", GEMINI["vertex_location"])
         host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
         url = VERTEX_URL.format(host=host, project=project, location=location, model=model)
-        return url, {"Authorization": f"Bearer {_vertex_token()}", "x-goog-user-project": project}
+        return url, vertex_headers(project)
     key = _env("GEMINI_API_KEY")
     if not key:
         raise NotConfigured("neither GOOGLE_CLOUD_PROJECT (Vertex AI) nor GEMINI_API_KEY is set")

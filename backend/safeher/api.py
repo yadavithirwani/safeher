@@ -99,9 +99,7 @@ _reports_lock = threading.Lock()
 
 def _reports_version() -> tuple:
     """Changes whenever a report is added or removed (cheap: one indexed query)."""
-    with userdb.database() as db:
-        n, last = db.execute("SELECT count(*), max(id) FROM reports").fetchone()
-    return (str(userdb.DB_FILE), n, last)
+    return userdb.reports_version()
 
 
 def _reports_for_planning() -> list[tuple[LatLon, sig.Report]]:
@@ -110,8 +108,7 @@ def _reports_for_planning() -> list[tuple[LatLon, sig.Report]]:
     version = _reports_version()
     with _reports_lock:
         if _reports_cache[0] != version:
-            with userdb.database() as db:
-                rows = db.execute("SELECT lat, lon, category, created_at, verification FROM reports").fetchall()
+            rows = userdb.list_reports()
             _reports_cache = (version, [((r["lat"], r["lon"]), sig.Report(r["category"],
                                          datetime.fromisoformat(r["created_at"]), r["verification"])) for r in rows])
         return _reports_cache[1]
@@ -516,10 +513,7 @@ def layers(south: float = Query(ge=-90, le=90), west: float = Query(ge=-180, le=
 def list_reports(city: str | None = None):
     if city and city not in CITIES:
         raise HTTPException(404, "unknown city")
-    with userdb.database() as db:
-        rows = db.execute("SELECT * FROM reports" + (" WHERE city = ?" if city else "") + " ORDER BY id",
-                          (city,) if city else ()).fetchall()
-    return [{k: r[k] for k in REPORT_FIELDS} for r in rows]
+    return [{k: r[k] for k in REPORT_FIELDS} for r in userdb.list_reports(city)]
 
 
 @app.post("/api/reports", status_code=201)
@@ -533,9 +527,7 @@ def create_report(req: ReportRequest):
         raise HTTPException(422, "Reports need to be on or near a street.")
     row = {"city": c.id, "lat": snapped[0], "lon": snapped[1], "category": req.category,
            "created_at": datetime.now(timezone.utc).isoformat(), "verification": "pending", "note": req.note}
-    with userdb.database() as db:
-        row["id"] = db.execute("INSERT INTO reports(city, lat, lon, category, created_at, verification, note) "
-                               "VALUES (:city, :lat, :lon, :category, :created_at, :verification, :note)", row).lastrowid
+    row["id"] = userdb.add_report(row)
     return {k: row[k] for k in REPORT_FIELDS}
 
 

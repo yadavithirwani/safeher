@@ -913,7 +913,14 @@ function setupSheet() {
 
 /* ---------- boot ---------- */
 async function main() {
-  [state.cities, state.meta] = await Promise.all([api("/api/cities"), api("/api/meta")]);
+  // The server sleeps when nobody is using it (Cloud Run scales to zero): say so if waking takes a moment.
+  const waking = setTimeout(() => toast("Starting up SafeHer’s server… this takes a few seconds after a quiet spell.", 15000), 1500);
+  try {
+    [state.cities, state.meta] = await Promise.all([api("/api/cities"), api("/api/meta")]);
+  } finally {
+    clearTimeout(waking);
+    if (!$("#toast").hidden && $("#toast").textContent.startsWith("Starting up")) $("#toast").hidden = true;
+  }
   $("#googleBrand").hidden = !googleOn("map_tiles");
   $("#helplines").innerHTML = state.meta.helplines.filter((h) => h.number !== "112")
     .map((h) => `<a href="tel:${h.number}"><b>${h.number}</b><span>${esc(h.label)}</span></a>`).join("");

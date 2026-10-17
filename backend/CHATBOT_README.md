@@ -172,7 +172,7 @@ Implementation: `safeher/chatbot/agents.py` (team/model), `tools.py` (services),
 Install from the repository root:
 
 ```bash
-uv pip install --python .venv/bin/python -e './backend[dev]' --index-url https://pypi.ci.artifacts.walmart.com/artifactory/api/pypi/external-pypi/simple --allow-insecure-host pypi.ci.artifacts.walmart.com
+cd backend && .venv/bin/pip install -e ".[dev,build]"
 ollama pull llama3.2:3b
 ```
 

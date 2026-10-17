@@ -12,7 +12,7 @@ import asyncio
 import httpx
 
 from .. import config
-from ..explain import BANNED, ProviderUnavailable, _env, _vertex_token, gemini_model, thinking
+from ..explain import BANNED, ProviderUnavailable, _env, gemini_model, thinking, vertex_headers
 
 CFG = config.app()["maps_grounding"]
 URL = ("https://aiplatform.googleapis.com/v1beta1/projects/{project}/locations/global/publishers/google/"
@@ -72,7 +72,7 @@ async def _ask(question: str, near: tuple[float, float] | None, transport, syste
     project = _env("GOOGLE_CLOUD_PROJECT")
     if not project:
         raise NotConfigured("Google Maps grounding needs GOOGLE_CLOUD_PROJECT (Vertex AI).")
-    token = await asyncio.to_thread(_vertex_token)
+    headers = await asyncio.to_thread(vertex_headers, project)
     body = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": question}]}],
@@ -88,8 +88,7 @@ async def _ask(question: str, near: tuple[float, float] | None, transport, syste
     url = URL.format(project=project, model=gemini_model(_env("MAPS_GROUNDING_MODEL", CFG["model"])))
     try:
         async with httpx.AsyncClient(timeout=float(CFG["timeout_s"]), transport=transport) as client:
-            r = await client.post(url, json=body, headers={"Authorization": f"Bearer {token}",
-                                                           "x-goog-user-project": project})
+            r = await client.post(url, json=body, headers=headers)
     except httpx.HTTPError as e:
         raise ProviderUnavailable(f"Google Maps grounding unreachable: {type(e).__name__}") from e
     if r.status_code != 200:

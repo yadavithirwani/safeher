@@ -22,7 +22,8 @@ from .pois import SAFE_SPACE_KINDS, STOP_KINDS, TRANSIT_KINDS, Poi, PointIndex, 
 
 DB_PATH = REPO_ROOT / config.load("cities")["output"]
 _local = threading.local()
-_CACHE_MAX = int(config.app()["trips"]["corridor_cache_size"])
+# SAFEHER_CORRIDOR_CACHE overrides for small servers (each cached corridor holds a walking graph).
+_CACHE_MAX = int(__import__("os").environ.get("SAFEHER_CORRIDOR_CACHE") or config.app()["trips"]["corridor_cache_size"])
 _corridors: "OrderedDict[str, object]" = OrderedDict()
 _corridor_lock = threading.Lock()
 

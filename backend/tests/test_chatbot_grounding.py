@@ -28,7 +28,7 @@ def transport(seen, status=200, body=REPLY):
 @pytest.fixture
 def vertex(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "safeher-demo")
-    monkeypatch.setattr(grounding, "_vertex_token", lambda: "tok")
+    monkeypatch.setattr(grounding, "vertex_headers", lambda project: {"Authorization": "Bearer tok"})
 
 
 def test_request_uses_the_maps_tool_location_and_project(vertex):
@@ -49,7 +49,7 @@ def test_without_a_cloud_project_it_is_off_and_errors_are_errors(monkeypatch):
     with pytest.raises(grounding.NotConfigured):
         asyncio.run(grounding.ask("q?", None))
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "p")
-    monkeypatch.setattr(grounding, "_vertex_token", lambda: "tok")
+    monkeypatch.setattr(grounding, "vertex_headers", lambda project: {"Authorization": "Bearer tok"})
     with pytest.raises(ProviderUnavailable, match="HTTP 403"):
         asyncio.run(grounding.ask("q?", None, transport([], 403, {"error": {"message": "denied"}})))
     cut = {"candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": "Half an ans"}]}}]}

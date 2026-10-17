@@ -23,7 +23,7 @@ Without the optional keys the app runs fully on open data: a CARTO basemap (Open
 ### 1 · Install
 ```bash
 git clone https://github.com/yadavithirwani/safeher.git && cd safeher/backend
-python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev,build]"
 cp .env.example .env    # then paste your keys into backend/.env (gitignored; never commit it)
 ```
 
@@ -49,6 +49,9 @@ The new database is swapped in only if every check passes. Check what you have w
 Open http://localhost:8765. Optional checks: `.venv/bin/python -m safeher.google_check` tests every Google API with your key; `.venv/bin/pytest` runs the tests (below).
 
 Walks work anywhere inside **Delhi and Bengaluru**, up to 8 km. A trip elsewhere, or across the two cities, gets a clear message.
+
+### 4 · Deploy (optional)
+Firebase Hosting + Cloud Run (scales to zero: no cost when idle) + Firestore for reports and live trips. Guide and one script: [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ### Configuration
 Everything city- or model-specific lives in `config/`, not in code:
