@@ -5,6 +5,7 @@
 .gcloudignore
 .dockerignore
 .claude/
+.github/
 .DS_Store
 **/__pycache__/
 **/*.pyc

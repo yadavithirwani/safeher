@@ -4,6 +4,7 @@
 #
 #   scripts/deploy.sh            all steps (setup + deploy)
 #   scripts/deploy.sh --app      redeploy code/data only (Cloud Run + Hosting), no setup questions
+#                                (GitHub Actions runs this on every push to main: .github/workflows/deploy.yml)
 #
 # Needs: gcloud signed in (gcloud auth login), firebase CLI signed in (firebase login), data/safeher.duckdb
 # built, and the Firebase project added to this Cloud project. See docs/DEPLOY.md.
@@ -103,12 +104,14 @@ if $APP_ONLY || ask "5/6 Build and deploy the API to Cloud Run (min 0 instances 
     --set-env-vars="SAFEHER_USERDB=firestore,GOOGLE_CLOUD_PROJECT=$PROJECT,GOOGLE_CLOUD_LOCATION=global,CHATBOT_PROVIDER=gemini,SAFEHER_CORRIDOR_CACHE=8" \
     ${SECRETS_FLAG[@]+"${SECRETS_FLAG[@]}"}
   # Keep only the 2 newest images, so storage doesn't grow with every deploy over the months.
-  cat > /tmp/safeher-cleanup.json <<'JSON'
+  # (Set once from a laptop; GitHub Actions' deployer isn't allowed to change repository settings.)
+  if [[ -z "${GITHUB_ACTIONS:-}" ]]; then cat > /tmp/safeher-cleanup.json <<'JSON'
 [{"name": "keep-two-newest", "action": {"type": "Keep"}, "mostRecentVersions": {"keepCount": 2}},
  {"name": "delete-older", "action": {"type": "Delete"}, "condition": {"tagState": "ANY"}}]
 JSON
   gc artifacts repositories set-cleanup-policies cloud-run-source-deploy --location="$REGION" \
     --policy=/tmp/safeher-cleanup.json --no-dry-run >/dev/null && echo "Image cleanup: keep the 2 newest."
+  fi
 fi
 
 # --- 6. Firebase Hosting: the web app, with /api/** routed to Cloud Run ------------------------

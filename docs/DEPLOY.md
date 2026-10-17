@@ -55,8 +55,23 @@ The deployed server keeps using its service account (ADC) and doesn't need the k
 
 ## Updating
 
-- **Code or data change:** run `scripts/deploy.sh --app`. This rebuilds the container and redeploys Hosting with no setup questions.
+- **Code change:** merge or push to `main`; GitHub Actions deploys it (below). By hand: `scripts/deploy.sh --app` rebuilds the container and redeploys Hosting with no setup questions.
+- **Data change:** `scripts/setup_ci.sh --data`, then run the workflow (or `scripts/deploy.sh --app` locally).
 - **Pause everything:** nothing is needed, since idle costs nothing. To take it offline, delete the Cloud Run service (`gcloud run services delete safeher-api --region asia-south1`) and disable Hosting (`firebase hosting:disable`).
+
+## Automatic deploys (GitHub Actions)
+
+`.github/workflows/deploy.yml` runs on every push to `main` (doc-only changes are skipped) and can also be started by hand: *Actions → Deploy → Run workflow*. It:
+1. signs in to Google with no stored key, using Workload Identity Federation. Google trusts only runs on `main` of `yadavithirwani/safeher`, which then act as the service account `safeher-deployer`
+2. downloads `data/safeher.duckdb` from the private bucket `gs://safeher-511808-data`, because the database isn't in Git
+3. runs the offline tests (about 400, ~4 min; no Gemini or Maps calls), and stops if any fail
+4. runs `scripts/deploy.sh --app` (Cloud Run + Hosting)
+
+**One-time setup:** run `scripts/setup_ci.sh` from your Mac. It asks before each step: the data bucket and upload, the deployer account and its roles, the identity pool limited to this repo, and the permission to act as the deployer. No GitHub settings or secrets are needed.
+
+**After rebuilding the data:** run `scripts/setup_ci.sh --data` to upload it, then *Run workflow*, or push to main.
+
+**Cost:** GitHub runners are free for public repos (2,000 minutes a month for private ones; a run takes about 10 minutes). The bucket costs under $0.01/month, plus about 2¢ of transfer per deploy.
 
 ## Local development is unchanged
 
