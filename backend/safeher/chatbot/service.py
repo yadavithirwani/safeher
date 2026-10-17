@@ -15,6 +15,8 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from . import scope
+from ..explain import ProviderUnavailable
 from .agents import build_agent_team
 from .models import (ChatRequest, ChatResponse, emergency_response, is_urgent,
                      location_warnings)
@@ -63,11 +65,22 @@ class ChatService:
         if conversation.lock.locked():
             raise HTTPException(409, "A chat turn is already running for this session.")
         async with conversation.lock:
-            response = await self.run_turn(req, conversation)
+            response = await self.guarded_turn(req, conversation)
             conversation.messages = (conversation.messages + [req.message, response.reply])[-6:]
             conversation.expires = time.monotonic() + SESSION_TTL
             response.session_id = token
             return response
+
+    async def guarded_turn(self, req, conversation):
+        """Safety questions only: classify first, so off-topic messages never reach an agent or tool."""
+        try:
+            verdict = await scope.check(req.message, conversation.messages)
+        except ProviderUnavailable:
+            return ChatResponse(reply=scope.CFG["check_failed"], intent="unavailable", provider="scope_guard",
+                                warnings=["The safety-topic check was unavailable, so this message was not answered."])
+        if not verdict.in_scope:
+            return ChatResponse(reply=scope.CFG["refusal"], intent="out_of_scope", provider="scope_guard")
+        return await self.run_turn(req, conversation)
 
     async def run_turn(self, req, conversation):
         sessions = InMemorySessionService()
@@ -113,7 +126,8 @@ class ChatService:
                 response.needs_clarification = True
             if observed.get("turn:budget_exceeded"):
                 response.warnings.append("Agent tool-call limit reached; please narrow the request.")
-            response.warnings.extend(warnings)
+            if not response.sources:  # a Google Maps answer about a named place didn't need a location
+                response.warnings.extend(warnings)
             return response
         except Exception:
             # Do not log exception text: HTTP/model errors may embed sensitive context or keys.

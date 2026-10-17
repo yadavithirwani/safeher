@@ -130,28 +130,37 @@
 
   <dialog id="chatbotDialog" class="herside" aria-modal="true" aria-labelledby="chatbotTitle" aria-describedby="chatbotPrivacy">
     <header class="herside-head">
-      <div><h2 id="chatbotTitle">HerSide</h2><p>Route help. Nearby support. By your side.</p></div>
-      <button id="chatbotClose" type="button" aria-label="Close HerSide">Close</button>
+      <span class="herside-avatar" aria-hidden="true"><span class="msr">auto_awesome</span></span>
+      <div class="herside-title">
+        <h2 id="chatbotTitle">HerSide</h2>
+        <p><span id="chatbotModel" class="herside-model">Your walking companion</span></p>
+      </div>
+      <button id="chatbotReset" class="herside-icon" type="button" aria-label="Clear this chat" title="Clear this chat"><span class="msr" aria-hidden="true">refresh</span></button>
+      <button id="chatbotClose" class="herside-icon" type="button" aria-label="Close HerSide" title="Close"><span class="msr" aria-hidden="true">close</span></button>
     </header>
-    <p id="chatbotPrivacy" class="herside-notice">AI can make mistakes. Messages and any location you attach go to SafeHer and relevant search providers. No automatic calls or live tracking. Chat history is not saved in this browser.</p>
-    <a class="herside-emergency" href="tel:112">Immediate danger in India? Call 112</a>
-    <div class="herside-prompts" aria-label="Suggested questions">
-      <button type="button" data-chat-prompt="Where is the nearest pharmacy?">Find a pharmacy</button>
-      <button type="button" id="chatbotTrip">Compare my selected trip</button>
-      <button type="button" id="chatbotSOS">I don’t feel safe</button>
-    </div>
+    <a class="herside-emergency" href="tel:112"><span class="msr" aria-hidden="true">call</span>Immediate danger in India? Call 112</a>
     <section id="chatbotMessages" class="herside-messages" role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions" tabindex="0"></section>
-    <p id="chatbotStatus" class="herside-status" role="status"></p>
-    <div class="herside-location">
-      <button type="button" id="chatbotLocation">Attach my location once</button>
-      <button type="button" id="chatbotRemoveLocation" hidden>Remove location</button>
-      <span id="chatbotLocationStatus">Location not attached.</span>
+    <div class="herside-dock">
+      <div class="herside-prompts" aria-label="Suggested questions">
+        <button type="button" id="chatbotTrip"><span class="msr" aria-hidden="true">alt_route</span>Compare my selected trip</button>
+        <button type="button" data-chat-prompt="Where is the nearest pharmacy?"><span class="msr" aria-hidden="true">local_pharmacy</span>Find a pharmacy</button>
+        <button type="button" id="chatbotSOS" class="herside-sos"><span class="msr" aria-hidden="true">sos</span>I don’t feel safe</button>
+      </div>
+      <p id="chatbotStatus" class="herside-status" role="status"></p>
+      <form id="chatbotForm" class="herside-compose">
+        <label for="chatbotInput" class="sr-only">Ask HerSide</label>
+        <div class="herside-box">
+          <textarea id="chatbotInput" rows="1" maxlength="2000" required placeholder="Ask about a place, a route or what’s open…"></textarea>
+          <div class="herside-tools">
+            <button type="button" id="chatbotLocation" class="herside-chip"><span class="msr" aria-hidden="true">my_location</span>Attach my location once</button>
+            <button type="button" id="chatbotRemoveLocation" class="herside-chip" hidden><span class="msr" aria-hidden="true">close</span>Remove location</button>
+            <span id="chatbotLocationStatus" class="herside-loc">Location not attached.</span>
+            <button id="chatbotSend" type="submit" aria-label="Send"><span class="msr" aria-hidden="true">arrow_upward</span></button>
+          </div>
+        </div>
+      </form>
+      <p id="chatbotPrivacy" class="herside-notice">AI can make mistakes. Messages and any location you attach go to SafeHer and relevant search providers. No automatic calls or live tracking; chat history isn’t saved in this browser. Not an emergency dispatch service.</p>
     </div>
-    <form id="chatbotForm" class="herside-compose">
-      <label for="chatbotInput">Ask HerSide</label>
-      <div><textarea id="chatbotInput" rows="2" maxlength="2000" required placeholder="Ask about a place or walking route…"></textarea><button id="chatbotSend" type="submit">Send</button></div>
-    </form>
-    <footer class="herside-footer"><button type="button" id="chatbotReset">Clear this chat</button><span>Not an emergency dispatch service.</span></footer>
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js"></script>

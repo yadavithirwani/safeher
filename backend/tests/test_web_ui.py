@@ -71,3 +71,18 @@ def test_changing_the_destination_replans(page):
     page.wait_for_function("labels => JSON.stringify([...document.querySelectorAll(\"[aria-label*='score']\")]"
                            ".map(e => e.getAttribute('aria-label'))) !== JSON.stringify(labels)", arg=before, timeout=15_000)
     assert len(route_labels(page)) >= 2
+
+
+def test_how_is_this_calculated_shows_this_routes_numbers(page):
+    """The dialog is built from the selected route's evidence, not a static page."""
+    page.goto(page.url.split("#")[0])
+    page.wait_for_function("typeof state !== 'undefined' && state.plan")
+    ev = page.evaluate("state.plan.routes[state.selected].evidence")
+    page.click("#explainBtn")
+    body = page.locator("#explainBody")
+    body.locator(".ev-formula").wait_for()
+    text = body.inner_text()
+    assert f"average of {ev['stretches']} stretches" in text
+    assert str(round(ev["score"])) in body.locator(".ev-total").inner_text()
+    assert body.locator(".ev-signal").count() == 5
+    assert "How the method works in general" in text

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from functools import lru_cache
@@ -18,6 +19,12 @@ from ..plan import WALK_M_PER_MIN
 from ..pois import SAFE_SPACE_KINDS, STOP_KINDS, Poi, PointIndex, pois_from_osm
 
 ATTRIBUTION = "© OpenStreetMap contributors (ODbL)"
+# Words people put around a place name ("near Toit in Bengaluru"); never part of the match.
+FILLER = {"in", "at", "near", "nearby", "around", "by", "the", "a", "an", "to", "from", "close", "new"}
+# Kinds of place, not names: in "pharmacy near Toit" the place is Toit (nearby search handles the kind).
+GENERIC = {"pharmacy", "chemist", "medical", "medical store", "police", "police station", "hospital", "clinic",
+           "toilet", "toilets", "washroom", "public toilet", "cafe", "restaurant", "atm", "bank", "bus stop",
+           "metro", "metro station", "supermarket", "temple", "school", "park", "parking"}
 RESTRICTED_ACCESS = {"no", "private", "customers", "permit", "members"}
 
 
@@ -29,6 +36,7 @@ class CityData:
     safe_spaces: PointIndex
     stops: PointIndex
     by_id: dict[str, Poi]
+    name_count: Counter = field(default_factory=Counter)  # how many places share each normalized name
 
 
 def normalize(text):
@@ -65,8 +73,9 @@ def index_city(city: City, pois: list[Poi], raw: tuple[dict, ...] | None = None)
             aliases = {name, tags.get("name:en"), tags.get("alt_name"), tags.get("short_name")}
             rows.append(({"id": osm, "name": name, "lat": lat, "lon": lon, "source": "openstreetmap"},
                          [normalize(a) for a in aliases if a]))
+    count = Counter(a for _, aliases in rows for a in set(aliases))
     return CityData(city, rows, PointIndex((p.latlon, p) for p in pois if p.kind in SAFE_SPACE_KINDS),
-                    PointIndex((p.latlon, p) for p in pois if p.kind in STOP_KINDS), {p.osm: p for p in pois})
+                    PointIndex((p.latlon, p) for p in pois if p.kind in STOP_KINDS), {p.osm: p for p in pois}, count)
 
 
 def corridor_data(origin, destination):
@@ -79,6 +88,8 @@ def _score(needle: str, name: str):
         return 1.0, "exact"
     if needle in name:
         return 0.95, "partial"
+    if len(name) >= 4 and f" {name} " in f" {needle} ":
+        return 0.9, "contained"  # "toit indiranagar" contains the place "toit"
     if len(needle) >= 5:
         m = SequenceMatcher(None, needle, name)
         if m.real_quick_ratio() >= 0.82 and m.quick_ratio() >= 0.82:  # cheap upper bounds first
@@ -99,12 +110,17 @@ def local_search(query: str) -> list[dict]:
         other_cities = {normalize(c.name) for c in CITIES.values() if c.id != city.id}
         if any(c in query.split() for c in other_cities):
             continue
-        needle = " ".join(w for w in query.split() if w not in {name, "new"})
+        needle = " ".join(w for w in query.split() if w != name and w not in FILLER)
         if len(needle) < 3:
             continue
         data = city_data(city.id)
         for row, aliases in data.rows:
             scores = [s for s in (_score(needle, a) for a in aliases) if s]
+            # A name found inside the query ("toit indiranagar"): prefer the rarer one (one Toit,
+            # many places called "Indiranagar" or "Pharmacy").
+            scores = [(sc - 0.01 * min(data.name_count[a], 9) - (0.05 if a in GENERIC else 0), m)
+                      if m == "contained" else (sc, m)
+                      for (sc, m), a in zip(scores, [a for a in aliases if _score(needle, a)])]
             if scores:
                 score, match = max(scores)
                 ranked.append((score, {**row, "city_id": city.id, "city": city.name, "match": match,

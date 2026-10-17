@@ -629,33 +629,96 @@ function googleMapsUrl(r) {
 }
 
 /* ---------- explain dialog ---------- */
+/* "How is this calculated?": the selected route's own numbers, not a generic page. Everything comes
+   from route.evidence (computed by the planner from the ~50 m stretches it actually scored). */
+// "2026-10-17T21:30+05:30" → "9:30 PM" (the trip's local time, as the planner reported it).
+const fmtTime = (iso) => { const m = /T(\d{2}):(\d{2})/.exec(iso || ""); return m ? fmtClock(+m[1] * 60 + +m[2]) : ""; };
+const SIGNAL_COLORS = { lighting: "#F2A541", transit: "#4C8BF5", safe_spaces: "#1F9E89", incidents: "#9C6ADE", reports: "#C2577A" };
+const pct = (x) => `${Math.round(x * 100)}%`;
 function openExplain() {
+  const plan = state.plan, route = plan?.routes?.[state.selected], ev = route?.evidence;
+  if (!ev) return openMethod();
+  const time = fmtTime(plan.departure_local), night = ev.night_fraction >= 0.5;
+  const sig = ev.signals, keys = Object.keys(sig);
+  const bar = keys.map((k) => `<span style="width:${(sig[k].points / (ev.average || 1)) * 100}%;background:${SIGNAL_COLORS[k]}" title="${esc(sig[k].label)}: ${sig[k].points} points"></span>`).join("");
+  const formula = ev.score == null
+    ? `<p>Only ${pct(ev.coverage)} of this route had enough data to score, so it has no score.</p>`
+    : `<div class="ev-formula">
+        <div><b>${ev.average}</b><small>average of ${ev.stretches} stretches (${ev.stretch_m} m each)</small></div><i>× ${ev.mean_share}</i>
+        <span>+</span>
+        <div><b>${ev.weakest}</b><small>its weakest ${pct(ev.weakest_percentile)}</small></div><i>× ${ev.worst_share}</i>
+        <span>=</span>
+        <div class="ev-total"><b>${Math.round(ev.score)}</b><small>route score</small></div></div>
+      <p class="small muted">The weakest-stretch term stops one poor stretch from being averaged away.</p>`;
+  const used = (k, s) => {
+    const u = s.used;
+    if (k === "lighting") return u.street_lamps ? `${u.street_lamps} mapped street lamps along the way.` : "No street lamps are mapped along this route.";
+    if (k === "transit") return u.length ? "Closest stops: " + u.map((x) => `${esc(x.name)} (${esc(x.kind)}, ${x.closest_m} m)`).join(" · ") : "";
+    if (k === "safe_spaces") {
+      const kinds = Object.entries(u.by_kind).map(([kd, n]) => `${n} ${esc(kd)}${n > 1 ? "s" : ""}`).join(", ");
+      const ex = u.examples.map((x) => `${esc(x.name)} <span class="muted">(${esc(x.kind)}, ${esc(x.hours)})</span>`).join(" · ");
+      return kinds ? `Open at ${esc(time)}: ${kinds}.${ex ? `<br>${ex}` : ""}` : "";
+    }
+    if (k === "incidents") return u.length ? u.map(esc).join("<br>") : "";
+    if (k === "reports") return Object.keys(u).length ? Object.entries(u).map(([c, n]) => `${n} × ${esc(REPORT_CATS[c]?.label || c)}`).join(", ") : "No community reports within 50 m.";
+    return "";
+  };
+  const rows = keys.map((k) => {
+    const s = sig[k];
+    const sources = s.sources.map((x) => `<span class="ev-src"><i style="width:${Math.max(4, x.share * 100)}%"></i>${esc(x.what)} · ${pct(x.share)}</span>`).join("");
+    const weightNote = s.effective_weight < s.weight_now - 0.01
+      ? `counted ${pct(s.effective_weight)} (set at ${pct(s.weight_now)}; less data, so it counts for less)`
+      : `counted ${pct(s.effective_weight)} (set at ${pct(s.weight_now)} ${night ? "at night" : "by day"})`;
+    return `<section class="ev-signal">
+      <header><span class="ev-dot" style="background:${SIGNAL_COLORS[k]}">${icon(SIGNAL_ICONS[k])}</span>
+        <b>${esc(s.label[0].toUpperCase() + s.label.slice(1))}</b>
+        <span class="ev-val">${s.value == null ? "no data" : `${s.value}/100`}</span>
+        <span class="ev-pts">+${s.points} pts</span></header>
+      <p class="small muted">${weightNote} · data confidence ${s.confidence}</p>
+      <div class="ev-sources">${sources}</div>
+      ${used(k, s) ? `<p class="ev-used">${used(k, s)}</p>` : ""}
+    </section>`;
+  }).join("");
+  $("#explainBody").innerHTML = `<div class="explain">
+    <p class="ev-lead"><b>${esc(route.label)}</b> at ${esc(time)}${night ? " (night: lighting weighs more)" : ""}: here is exactly what the score was calculated from.</p>
+    ${formula}
+    <h3>What made up the ${ev.average ?? "–"} average</h3>
+    <div class="ev-bar" role="img" aria-label="Points from each signal">${bar}</div>
+    ${rows}
+    <details class="ev-method"><summary>How the method works in general</summary><div id="methodBody"></div></details>
+    <p class="small muted">Weights version ${esc(state.meta.weights_version)}. Scores reflect available data and never mean a route is safe.</p></div>`;
+  $("#methodBody").innerHTML = methodHtml();
+  $("#explainDialog").showModal();
+}
+
+function openMethod() {
+  $("#explainBody").innerHTML = `<div class="explain">${methodHtml()}</div>`;
+  $("#explainDialog").showModal();
+}
+
+function methodHtml() {
   const m = state.meta, f = state.plan?.night_fraction ?? 0;
   const labels = { lighting: "Street lighting", transit: "Transit nearby", safe_spaces: "Open places nearby", incidents: "Historical incidents", reports: "Recent community reports" };
   const how = {
-    lighting: "OpenStreetMap lit tags (high confidence), mapped street lamps, NASA VIIRS night lights where loaded, else an estimate from road type (low confidence).",
+    lighting: "OpenStreetMap lit tags (high confidence), mapped street lamps, NASA VIIRS night lights, else an estimate from road type (low confidence).",
     transit: "Distance to the nearest bus or metro stop open at this time: ≤150 m = 100, ≥800 m = 0.",
     safe_spaces: "Police, hospitals, pharmacies, shops, cafés and fuel stations open at this time within 150 m. Police and hospitals count 1.5×.",
-    incidents: "NCRB district-level crimes against women in public spaces (Delhi only). One value per district, low confidence.",
+    incidents: "NCRB crimes against women in public spaces, by Delhi police district at each point. Low confidence.",
     reports: "SafeHer community reports within 50 m, fading by half every 7 days; unverified reports count half.",
   };
   const rows = Object.keys(labels).map((k) => {
     const w = f * m.night_weights[k] + (1 - f) * m.day_weights[k];
     return `<tr><td>${icon(SIGNAL_ICONS[k])} ${labels[k]}</td><td><b>${Math.round(w * 100)}%</b><br><span class="muted small">night ${Math.round(m.night_weights[k] * 100)} · day ${Math.round(m.day_weights[k] * 100)}</span></td><td>${how[k]}</td></tr>`;
   }).join("");
-  $("#explainBody").innerHTML = `<div class="explain">
-    <p>Each route is split into ~50 m stretches. Every stretch gets five signal scores (0–100). Signals with less data count for less: missing data is never treated as a bad score.</p>
+  return `<p>Each route is split into ~50 m stretches. Every stretch gets five signal scores (0–100). Signals with less data count for less: missing data is never treated as a bad score.</p>
     <table><thead><tr><th>Signal</th><th>Weight now</th><th>How it’s measured</th></tr></thead><tbody>${rows}</tbody></table>
     <h3>Route score</h3>
     <code>score = 0.8 × average of all stretches + 0.2 × the weakest 10% of the route</code>
-    <p>The second term stops one dark stretch from being averaged away. Lighting weighs more after sunset; weights blend over 30 minutes around sunrise and sunset.</p>
     <h3>Bands</h3><p>75–100 <b>More support</b> · 50–74 <b>Mixed</b> · 0–49 <b>Less support</b>. We never call a route “safe”.</p>
     <h3>Limits</h3><ul>
       <li>Lighting is estimated for many streets; estimated stretches are marked low confidence.</li>
       <li>Opening hours are assumed from typical hours when not mapped.</li>
-      <li>Incident data is coarse: one figure per police district (Delhi), none below city level elsewhere.</li></ul>
-    <p class="small muted">Weights version ${esc(m.weights_version)}. Full method: docs/DESIGN_SPEC.md §7–8.</p></div>`;
-  $("#explainDialog").showModal();
+      <li>Incident data is coarse: one figure per police district (Delhi), none below city level elsewhere.</li></ul>`;
 }
 
 /* ---------- nearby (category chips) ---------- */

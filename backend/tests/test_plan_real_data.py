@@ -81,3 +81,26 @@ def test_a_trip_across_police_districts_names_each_one():
     p = plan((28.6315, 77.2167), (28.6519, 77.1909), datetime(2026, 10, 7, 21, 30, tzinfo=IST))
     note = next(n for n in p["data_notes"] if "NCRB" in n)
     assert "New Delhi police district" in note and "Central police district" in note
+
+
+def test_score_evidence_adds_up_to_the_score(night_plan):
+    """"How is this calculated?" shows the route's own numbers; they must reproduce the score exactly."""
+    for r in night_plan["routes"]:
+        ev = r["evidence"]
+        if ev["score"] is None:
+            continue
+        assert abs(sum(s["points"] for s in ev["signals"].values()) - ev["average"]) <= 0.3
+        assert abs(ev["mean_share"] * ev["average"] + ev["worst_share"] * ev["weakest"] - ev["score"]) <= 0.1
+        assert round(ev["score"]) == r["score"]
+        assert abs(sum(s["effective_weight"] for s in ev["signals"].values()) - 1) <= 0.01
+        for s in ev["signals"].values():
+            assert abs(sum(x["share"] for x in s["sources"]) - 1) <= 0.01  # every stretch accounted for
+        assert ev["stretches"] == len(r["pieces"])
+
+
+def test_score_evidence_names_what_was_used(night_plan):
+    ev = night_plan["routes"][0]["evidence"]["signals"]
+    assert isinstance(ev["lighting"]["used"]["street_lamps"], int)
+    assert ev["transit"]["used"] and all(s["name"] and s["closest_m"] >= 0 for s in ev["transit"]["used"])
+    assert ev["safe_spaces"]["used"]["by_kind"]
+    assert all(x["hours"] in ("mapped hours", "typical hours assumed") for x in ev["safe_spaces"]["used"]["examples"])

@@ -26,6 +26,61 @@
     get("chatbotTrip").disabled = value;
     dialog.querySelectorAll("[data-chat-prompt]").forEach((button) => { button.disabled = value; });
     status.textContent = value ? "HerSide is checking. Emergency calling is always available above." : "";
+    messages.querySelector(".herside-typing")?.remove();
+    if (value) {  // three animated dots while the agents work
+      const dots = node("div", undefined, messages);
+      dots.className = "herside-typing";
+      dots.setAttribute("aria-hidden", "true");
+      for (let i = 0; i < 3; i++) node("i", undefined, dots);
+      messages.scrollTop = messages.scrollHeight;
+    }
+  }
+  function icon(name, parent) {
+    const span = node("span", name, parent);
+    span.className = "msr";
+    span.setAttribute("aria-hidden", "true");
+    return span;
+  }
+  function pill(text, parent, kind = "") {
+    const span = node("span", text, parent);
+    span.className = `herside-pill ${kind}`.trim();
+    return span;
+  }
+  function action(parent, glyph, label, onClick) {
+    const button = node("button", undefined, parent);
+    button.type = "button";
+    icon(glyph, button);
+    button.append(label);
+    button.addEventListener("click", onClick);
+    return button;
+  }
+  /* Show a place on the SafeHer map (OpenStreetMap results only: Google results stay Google-linked). */
+  function showOnMap(lat, lon, name) {
+    if (typeof map === "undefined" || !map || typeof maplibregl === "undefined") return;
+    dialog.close();
+    if (state.markers.temp) state.markers.temp.remove();
+    state.markers.temp = new maplibregl.Marker({ color: "#C2577A" }).setLngLat([lon, lat]).addTo(map);
+    map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 16), duration: 900 });
+  }
+  function showRoute(label) {
+    if (typeof state === "undefined" || !state.plan || typeof selectRoute !== "function") return false;
+    const i = state.plan.routes.findIndex((r) => r.label === label);
+    if (i < 0) return false;
+    dialog.close();
+    selectRoute(i);
+    return true;
+  }
+  function modelBadge() {
+    const info = typeof state !== "undefined" ? state.meta?.assistant : null;
+    const badge = get("chatbotModel");
+    if (!info || !badge) return;
+    const name = info.provider === "gemini"
+      ? info.model.replace(/^gemini-/, "Gemini ").replace(/-/g, " ").replace(/\b(flash|pro|lite)\b/g, (w) => w[0].toUpperCase() + w.slice(1))
+      : info.model;
+    badge.replaceChildren();
+    icon(info.provider === "gemini" ? "bolt" : "computer", badge).style.fontSize = "14px";
+    node("b", name, badge);
+    badge.append(` · ${info.platform}`);
   }
   function locationLabel() {
     get("chatbotRemoveLocation").hidden = !position;
@@ -66,36 +121,74 @@
     link.rel = "noopener noreferrer";
     link.referrerPolicy = "no-referrer";
   }
+  /* Google Maps grounding: sources right after the answer, each attributed to "Google Maps"
+     (exact text, not translated), with the returned title linked to the returned URI. */
+  function sources(list, article) {
+    const box = node("div", undefined, article);
+    box.className = "herside-sources";
+    const head = node("div", undefined, box);
+    head.className = "herside-sources-head";
+    node("span", "Sources", head);
+    for (const src of list) {
+      if (!/^https:\/\//.test(src.uri || "")) continue;
+      const row = node("div", undefined, box);
+      row.className = "herside-source";
+      const label = node("span", "Google Maps", row);
+      label.className = "herside-gmaps";
+      label.setAttribute("translate", "no");
+      externalLink(row, src.title || "Place", src.uri);
+      for (const review of src.reviews || []) {
+        if (/^https:\/\//.test(review.uri || "")) externalLink(row, "Review", review.uri);
+      }
+    }
+  }
   function render(data) {
     const article = message("HerSide", data.reply || "No reply was available.");
+    if (data.sources?.length) sources(data.sources, article);
     for (const place of data.places || []) {
       const card = node("div", undefined, article);
       card.className = "herside-card";
-      node("strong", place.name || place.address || "Location", card);
-      node("small", `Source: ${place.source || "not specified"}${place.city ? ` · ${place.city}` : ""}`, card);
-      if (place.distance_m != null) node("small", `${place.distance_m} m · ${place.distance_basis === "straight_line" ? "straight-line distance, not a walking estimate" : place.distance_basis || "distance basis unknown"}`, card);
-      if (place.hours_basis) node("small", `Hours: ${place.hours_basis.replaceAll("_", " ")} · ${place.open_now == null ? "availability unknown" : place.open_now ? "expected open" : "expected closed"}`, card);
-      if (place.snapshot_at) node("small", `Cached snapshot: ${place.snapshot_at}`, card);
+      const title = node("strong", undefined, card);
+      icon(place.source === "google_places" ? "travel_explore" : "place", title);
+      node("span", place.name || place.address || "Location", title);
+      const pills = node("div", undefined, card);
+      pills.className = "herside-pills";
+      if (place.open_now != null) pill(place.open_now ? "Expected open" : "Expected closed", pills, place.open_now ? "open" : "closed");
+      if (place.distance_m != null) pill(`${place.distance_m} m`, pills);
+      if (place.neighbourhood) pill(place.neighbourhood, pills);
+      if (place.distance_m != null) node("small", place.distance_basis === "straight_line" ? "Straight-line distance, not a walking estimate" : place.distance_basis || "Distance basis unknown", card);
+      if (place.hours_basis) node("small", `Hours: ${place.hours_basis.replaceAll("_", " ")}${place.open_now == null ? " · availability unknown" : ""}`, card);
+      node("small", `Source: ${place.source || "not specified"}${place.city ? ` · ${place.city}` : ""}${place.snapshot_at ? ` · data from ${place.snapshot_at.slice(0, 10)}` : ""}`, card);
       for (const attribution of place.attributions || []) node("small", typeof attribution === "string" ? attribution : attribution.provider || attribution.providerUri || "Google Maps", card);
       const lat = place.lat, lon = place.lon;
       if (Number.isFinite(lat) && Math.abs(lat) <= 90 && Number.isFinite(lon) && Math.abs(lon) <= 180) {
-        const confirm = node("button", "Use these coordinates in a question", card);
-        confirm.type = "button";
-        confirm.addEventListener("click", () => {
+        const actions = node("div", undefined, card);
+        actions.className = "herside-actions";
+        // OpenStreetMap places can be shown on the SafeHer map; Google results stay Google-linked.
+        if (place.source !== "google_places" && typeof map !== "undefined") action(actions, "map", "Show on map", () => showOnMap(lat, lon, place.name));
+        action(actions, "edit_location", "Use these coordinates in a question", () => {
           input.value = `Use confirmed location ${lat}, ${lon}. `;
           input.focus();
         });
-        // Google results remain Google-linked, not plotted onto the OSM basemap.
-        externalLink(card, "Open Google Maps ↗", `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lon}`)}${place.source === "google_places" && place.id ? `&query_place_id=${encodeURIComponent(place.id)}` : ""}`);
+        externalLink(actions, "Open Google Maps ↗", `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lon}`)}${place.source === "google_places" && place.id ? `&query_place_id=${encodeURIComponent(place.id)}` : ""}`);
       }
     }
     for (const route of data.routes || []) {
       const card = node("div", undefined, article);
       card.className = "herside-card";
-      node("strong", route.label || "Walking estimate", card);
+      const title = node("strong", undefined, card);
+      const score = node("span", route.score == null ? "–" : String(route.score), title);
+      score.className = `herside-score ${route.score == null ? "" : route.score >= 80 ? "high" : route.score >= 60 ? "mid" : "low"}`.trim();
+      score.setAttribute("aria-hidden", "true");
+      node("span", route.label || "Walking estimate", title);
       node("p", `${route.distance_m ?? route.distanceMeters ?? "Unknown"} m · ${route.duration_min != null ? `${route.duration_min} min` : route.duration || "duration unknown"}`, card);
       node("small", route.score == null ? "No SafeHer support score for this estimate." : `Support score: ${route.score}/100 · ${route.band || ""}`, card);
       if (route.plan_b) node("small", `Plan B: ${Math.round(route.plan_b.within_threshold_share * 100)}% within five minutes of a mapped option.`, card);
+      if (route.label && typeof state !== "undefined" && state.plan?.routes?.some((r) => r.label === route.label)) {
+        const actions = node("div", undefined, card);
+        actions.className = "herside-actions";
+        action(actions, "route", "Show on map", () => showRoute(route.label));
+      }
     }
     for (const action of data.actions || []) {
       if (action.type === "call" && /^tel:(112|181|1091)$/.test(action.value || "")) {
@@ -152,7 +245,17 @@
       if (controller === request) { controller = null; busy(false); }
     }
   }
-  get("chatbotBtn").addEventListener("click", () => { dialog.showModal(); input.focus(); });
+  get("chatbotBtn").addEventListener("click", () => { modelBadge(); dialog.showModal(); input.focus(); });
+  input.addEventListener("keydown", (event) => {  // Enter sends; Shift+Enter adds a line
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      get("chatbotForm").requestSubmit();
+    }
+  });
+  input.addEventListener("input", () => {
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 140)}px`;
+  });
   dialog.addEventListener("keydown", (event) => {
     if (event.key !== "Tab") return;
     const focusable = [...dialog.querySelectorAll("button:not(:disabled), a[href], textarea, [tabindex='0']")]

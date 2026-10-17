@@ -1,7 +1,8 @@
 """Plain-language route explanations, grounded only in the computed plan (design spec §5.4).
 
-Providers (SAFEHER_LLM=auto, the default, uses Gemini when GEMINI_API_KEY is set):
-  - Gemini      — needs GEMINI_API_KEY in backend/.env (free key from Google AI Studio)
+Providers (SAFEHER_LLM=auto, the default, uses Gemini when it is configured):
+  - Gemini      — on Vertex AI when GOOGLE_CLOUD_PROJECT is set (Application Default Credentials:
+                  gcloud auth application-default login), else GEMINI_API_KEY (Google AI Studio)
   - Ollama      — opt-in with SAFEHER_LLM=ollama; local model OLLAMA_MODEL (default phi3:mini)
   - Template    — deterministic sentences built from the same facts; used when no model is configured
 
@@ -27,6 +28,8 @@ from . import config
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 LANGUAGES = {k: v["name"] for k, v in config.app()["languages"].items()}
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+VERTEX_URL = ("https://{host}/v1/projects/{project}/locations/{location}/publishers/google/models/"
+              "{model}:generateContent")
 DEFAULT_OLLAMA_URL = "http://localhost:11434/api/generate"
 
 
@@ -151,12 +154,21 @@ def check(text: str, facts: dict, lang: str, forbidden_names: set[str] = frozens
         (s["name"] or "").lower() for r in facts["routes"] for s in r["stops"]}
     # Blank out places that ARE in the facts first, so "Indiranagar Traffic Police Station" (allowed)
     # doesn't trip the separate place called "Indiranagar"; then match whole words only.
-    lowered = text.lower()
+    blanked = text
     for k in sorted((k for k in known if k), key=len, reverse=True):
-        lowered = lowered.replace(k, " ")
+        blanked = re.sub(re.escape(k), " ", blanked, flags=re.IGNORECASE)
+    lowered = blanked.lower()
     for name in forbidden_names:
         n = name.lower()
-        if len(n) > 4 and n not in known and re.search(rf"(?<!\w){re.escape(n)}(?!\w)", lowered):
+        if len(n) <= 4 or n in known:
+            continue
+        if " " in n:
+            hit = re.search(rf"(?<!\w){re.escape(n)}(?!\w)", lowered)
+        else:
+            # A one-word place ("Options", "Care", "Garage") only counts when written as a name:
+            # capitalised, and not just the first word of a sentence or line.
+            hit = re.search(rf"(?<![.!?:\n]\s)(?<![.!?:\n])(?<=\s|\(|,|\"){re.escape(name)}(?!\w)", blanked)
+        if hit:
             problems.append(f"mentions a place not in the route data: '{name}'")
     if lang == "hi" and not re.search(DEVANAGARI, text):
         problems.append("not written in Hindi")
@@ -210,18 +222,63 @@ class ExplainFailed(Exception):
 
 
 GEMINI = config.app()["gemini"]
+ALLOWED_MODEL = re.compile(r"^gemini-2\.5-(flash|flash-lite)(-\d+)?$")  # project rule: Gemini 2.5 only, never newer
+
+
+def gemini_model(name: str) -> str:
+    """The model to call, refusing anything but Gemini 2.5 Flash / Flash-Lite (SafeHer uses 2.5 only)."""
+    if not ALLOWED_MODEL.match(name):
+        raise RuntimeError(f"SafeHer uses Gemini 2.5 Flash or Flash-Lite only; refusing model {name!r}")
+    return name
+
+
+def thinking(budget) -> dict:
+    """Gemini 2.5 thinking config: a token budget (0 = off, so short answers aren't cut off)."""
+    return {"thinkingBudget": int(budget)}
+
+
+_adc = None  # cached Application Default Credentials (refreshed when the token expires)
+
+
+def _vertex_token() -> str:
+    """An OAuth token from Application Default Credentials (`gcloud auth application-default login`)."""
+    global _adc
+    import google.auth
+    import google.auth.exceptions
+    from google.auth.transport.requests import Request
+
+    try:
+        if _adc is None:
+            _adc, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        if not _adc.valid:
+            _adc.refresh(Request())
+    except google.auth.exceptions.GoogleAuthError as e:
+        _adc = None
+        raise ProviderUnavailable(f"Vertex AI sign-in failed (run: gcloud auth application-default login): {e}") from e
+    return _adc.token
+
+
+def gemini_target(model: str) -> tuple[str, dict]:
+    """Where to send a Gemini request: Vertex AI with ADC when GOOGLE_CLOUD_PROJECT is set, else the
+    Gemini API with GEMINI_API_KEY. Neither set: the feature is off."""
+    project = _env("GOOGLE_CLOUD_PROJECT")
+    if project:
+        location = _env("GOOGLE_CLOUD_LOCATION", GEMINI["vertex_location"])
+        host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
+        url = VERTEX_URL.format(host=host, project=project, location=location, model=model)
+        return url, {"Authorization": f"Bearer {_vertex_token()}", "x-goog-user-project": project}
+    key = _env("GEMINI_API_KEY")
+    if not key:
+        raise NotConfigured("neither GOOGLE_CLOUD_PROJECT (Vertex AI) nor GEMINI_API_KEY is set")
+    return GEMINI_URL.format(model=model), {"x-goog-api-key": key}
 
 
 def gemini_generate(system: str, user: str, timeout: float | None = None) -> tuple[str, str]:
-    key = _env("GEMINI_API_KEY")
-    if not key:
-        raise NotConfigured("GEMINI_API_KEY not set")
-    model = _env("GEMINI_MODEL", GEMINI["model"])
+    model = gemini_model(_env("GEMINI_MODEL", GEMINI["model"]))
+    url, headers = gemini_target(model)
     timeout = float(GEMINI["timeout_s"]) if timeout is None else timeout
     gen = {"temperature": GEMINI["temperature"], "maxOutputTokens": GEMINI["max_output_tokens"]}
-    if GEMINI.get("thinking_level"):
-        # Newer Flash models "think" first; unlimited, that can use the whole output allowance (empty answer).
-        gen["thinkingConfig"] = {"thinkingLevel": GEMINI["thinking_level"]}
+    gen["thinkingConfig"] = thinking(GEMINI["thinking_budget"])
     body = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user}]}],
@@ -229,8 +286,7 @@ def gemini_generate(system: str, user: str, timeout: float | None = None) -> tup
     }
     for attempt in range(int(GEMINI["busy_retries"]) + 1):
         try:
-            r = httpx.post(GEMINI_URL.format(model=model), json=body, timeout=timeout,
-                           headers={"x-goog-api-key": key})
+            r = httpx.post(url, json=body, timeout=timeout, headers=headers)
         except httpx.HTTPError as e:
             raise ProviderUnavailable(f"Gemini unreachable: {e}") from e
         if r.status_code not in (429, 503):

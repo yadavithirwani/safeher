@@ -149,11 +149,14 @@ needs_db = pytest.mark.skipif(not store.available(), reason="run: python -m safe
 @pytest.mark.parametrize("query,name,city", [
     ("Toit", "Toit", "Bengaluru"), ("Bob's Bar", "Bob's Bar", "Bengaluru"), ("bobs bar bangalore", "Bob's Bar", "Bengaluru"),
     ("India Gate Delhi", "India Gate", "Delhi"), ("Lodhi Garden", "Lodhi Garden", "Delhi"),
-    ("hauz khas metro", "Hauz Khas Metro", "Delhi")])
+    ("hauz khas metro", "Hauz Khas Metro", "Delhi"),
+    # How people (and the model) phrase it: filler words and a neighbourhood around the name.
+    ("Toit in Bengaluru", "Toit", "Bengaluru"), ("near Toit", "Toit", "Bengaluru"),
+    ("Toit Indiranagar", "Toit", "Bengaluru"), ("pharmacy near Toit", "Toit", "Bengaluru"), ("the Lodhi Garden in New Delhi", "Lodhi Garden", "Delhi")])
 def test_real_search_finds_places_city_wide(query, name, city):
     """Ported from the two demo areas to the whole of both cities: pubs, monuments and parks are found."""
     top = local_data.local_search(query)[0]
-    assert (top["name"], top["city"], top["match"]) == (name, city, "exact")
+    assert (top["name"], top["city"]) == (name, city) and top["match"] in ("exact", "contained")
     assert top["requires_confirmation"] and top["neighbourhood"] and top["snapshot_at"]
 
 
