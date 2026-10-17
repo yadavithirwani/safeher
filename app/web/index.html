@@ -16,6 +16,26 @@
   <link href="/static/sharing.css" rel="stylesheet">
 </head>
 <body>
+  <!-- Shown until the first routes are drawn: explains a cold start instead of an empty map. -->
+  <div id="bootScreen" class="boot" role="status" aria-live="polite" aria-label="Starting SafeHer">
+    <div class="boot-card">
+      <div class="boot-brand">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#5B2A86"/><path d="M16 6c-4 0-7 3-7 7 0 5 7 13 7 13s7-8 7-13c0-4-3-7-7-7z" fill="#F2A541"/><circle cx="16" cy="13" r="2.6" fill="#5B2A86"/></svg>
+        <div><b>SafeHer</b><span>Walking routes compared on lighting, transit and open places</span></div>
+      </div>
+      <ol class="boot-steps">
+        <li data-step="server" class="active"><i aria-hidden="true"></i><div><b>Waking up the server</b>
+          <small>It sleeps when nobody is using SafeHer, so it costs nothing while idle. Waking takes a few seconds.</small></div></li>
+        <li data-step="data"><i aria-hidden="true"></i><div><b>Opening Delhi and Bengaluru street data</b>
+          <small>1.6 million street segments from OpenStreetMap, NASA night lights and police-district figures.</small></div></li>
+        <li data-step="routes"><i aria-hidden="true"></i><div><b>Scoring your first walk</b>
+          <small>Every 50 m: street lighting, transit nearby, open places, past incidents and community reports.</small></div></li>
+      </ol>
+      <div class="boot-foot"><span class="boot-timer"><span id="bootTimer">0</span> s</span><span id="bootTip" class="boot-tip"></span></div>
+      <div id="bootError" class="boot-error" hidden><span id="bootErrorText"></span><button type="button" id="bootRetry">Try again</button></div>
+      <p class="boot-sos">In immediate danger? <a href="tel:112">Call 112</a> — no need to wait for the app.</p>
+    </div>
+  </div>
   <div id="map" role="application" aria-label="Map"></div>
 
   <!-- Category chips over the map -->

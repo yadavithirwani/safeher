@@ -86,3 +86,36 @@ def test_how_is_this_calculated_shows_this_routes_numbers(page):
     assert str(round(ev["score"])) in body.locator(".ev-total").inner_text()
     assert body.locator(".ev-signal").count() == 5
     assert "How the method works in general" in text
+
+
+
+def test_cold_start_shows_a_full_screen_until_the_first_routes(page, base_url):
+    """While the server wakes, a full-screen explanation with real progress covers the app; it goes away
+    once the first routes are drawn."""
+    if True:  # a fresh page (new context) in the module's browser
+        pg = page.context.browser.new_page(viewport={"width": 1280, "height": 800})
+        # Record the start-up screen every 100 ms from inside the page.
+        pg.add_init_script("""window.__boot = []; const tick = setInterval(() => {
+          const el = document.getElementById('bootScreen');
+          if (!el) { window.__boot.push('gone'); clearInterval(tick); return; }
+          const r = el.getBoundingClientRect();
+          const active = [...el.querySelectorAll('[data-step].active')].map(li => li.dataset.step).join(',');
+          window.__boot.push([getComputedStyle(el).opacity, Math.round(r.width), Math.round(r.height), active].join('|'));
+        }, 100);""")
+        def slow(route):  # a sleeping server: the first answers take a few seconds
+            import time as _t
+            _t.sleep(2.5)
+            route.continue_()
+        pg.route("**/api/cities", slow)
+        pg.goto(base_url)
+        pg.wait_for_function("typeof state !== 'undefined' && state.plan", timeout=60000)
+        pg.wait_for_function("window.__boot.at(-1) === 'gone'", timeout=5000)
+        log = pg.evaluate("window.__boot")
+        shown = [x.split("|") for x in log if x != "gone"]
+        assert shown and all(op == "1" for op, *_ in shown[:-4])  # opaque from the first paint (fades out at the end)
+        assert all(int(w) >= 1280 and int(h) >= 800 for _, w, h, _ in shown)  # covers the whole page
+        steps = [a for *_, a in shown]
+        assert steps.count("server") >= 10  # "Waking up the server" while the slow answer is pending
+        assert steps.index("server") < steps.index("routes")  # then on to scoring the first walk
+        assert pg.locator("[aria-label*='score']").count() >= 2
+        pg.close()

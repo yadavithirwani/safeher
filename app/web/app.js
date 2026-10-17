@@ -340,10 +340,12 @@ async function planTrip(fit = false) {
     writeHash();
     updateTimeLabel();
     loadExplanation();
+    boot.done();
   } catch (err) {
     if (seq !== state.planSeq) return;
     state.plan = null; drawRoutes(false);
     $("#view").innerHTML = `<div class="error">${icon("error")}<span>${esc(err.message)}</span></div>`;
+    boot.done();  // the error is shown in the panel, where the person can change the trip
   }
 }
 
@@ -912,15 +914,47 @@ function setupSheet() {
 }
 
 /* ---------- boot ---------- */
+/* Start-up screen (#bootScreen in index.html): real steps ticked off as they finish, an elapsed-time
+   counter and rotating tips, so a cold start reads as "the server is waking up", not a broken map. */
+const boot = (() => {
+  const el = document.getElementById("bootScreen");
+  const tips = [
+    "SafeHer never calls a route “safe”: it shows the evidence and lets you decide.",
+    "Scores change with the time: lighting weighs more after sunset, and fewer places are open late.",
+    "Tap “How is this calculated?” to see every number behind a route’s score.",
+    "HerSide answers safety questions only, and SOS skips the AI to show 112 straight away.",
+    "Night map: NASA satellite night lights, streets mapped as lit, and street lamps.",
+  ];
+  if (!el) return { step() {}, done() {}, fail() {} };
+  const started = performance.now();
+  let tip = 0;
+  const setTip = () => { const t = $("#bootTip"); t.style.opacity = 0; setTimeout(() => { t.textContent = tips[tip++ % tips.length]; t.style.opacity = 1; }, 200); };
+  setTip();
+  const timers = [setInterval(() => { $("#bootTimer").textContent = Math.floor((performance.now() - started) / 1000); }, 250),
+                  setInterval(setTip, 4500)];
+  const mark = (name, cls) => el.querySelector(`[data-step="${name}"]`)?.classList.add(cls);
+  return {
+    step(done, next) { mark(done, "done"); el.querySelector(`[data-step="${done}"]`)?.classList.remove("active"); if (next) mark(next, "active"); },
+    done() {
+      if (!el.isConnected) return;
+      ["server", "data", "routes"].forEach((n) => mark(n, "done"));
+      timers.forEach(clearInterval);
+      el.classList.add("leaving");
+      setTimeout(() => el.remove(), 400);
+    },
+    fail(message) {
+      timers.forEach(clearInterval);
+      el.querySelectorAll(".active").forEach((li) => li.classList.remove("active"));
+      $("#bootErrorText").textContent = message;
+      $("#bootError").hidden = false;
+      $("#bootRetry").onclick = () => location.reload();
+    },
+  };
+})();
+
 async function main() {
-  // The server sleeps when nobody is using it (Cloud Run scales to zero): say so if waking takes a moment.
-  const waking = setTimeout(() => toast("Starting up SafeHer’s server… this takes a few seconds after a quiet spell.", 15000), 1500);
-  try {
-    [state.cities, state.meta] = await Promise.all([api("/api/cities"), api("/api/meta")]);
-  } finally {
-    clearTimeout(waking);
-    if (!$("#toast").hidden && $("#toast").textContent.startsWith("Starting up")) $("#toast").hidden = true;
-  }
+  [state.cities, state.meta] = await Promise.all([api("/api/cities"), api("/api/meta")]);
+  boot.step("server", "data");
   $("#googleBrand").hidden = !googleOn("map_tiles");
   $("#helplines").innerHTML = state.meta.helplines.filter((h) => h.number !== "112")
     .map((h) => `<a href="tel:${h.number}"><b>${h.number}</b><span>${esc(h.label)}</span></a>`).join("");
@@ -938,6 +972,7 @@ async function main() {
   $("#originInput").value = preset[0]?.name || ""; $("#destInput").value = preset[1]?.name || "";
   updateTimeLabel(); renderSkeleton();
   await initMap(state.city.center);
+  boot.step("data", "routes");
   setupSheet();
   setupSearch("#originInput", "#originSuggest", "origin");
   setupSearch("#destInput", "#destSuggest", "dest");
@@ -965,5 +1000,5 @@ async function main() {
 }
 
 main().catch((err) => {
-  document.body.insertAdjacentHTML("beforeend", `<div class="toast">Couldn’t start SafeHer: ${esc(err.message)}. Is the backend running?</div>`);
+  boot.fail(`Couldn’t reach SafeHer’s server (${err.message}). It may still be waking up.`);
 });
