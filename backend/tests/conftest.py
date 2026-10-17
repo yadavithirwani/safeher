@@ -37,3 +37,21 @@ def private_user_database(monkeypatch, tmp_path):
     """Each test gets its own empty user database (reports, live trips) instead of backend/var."""
     from safeher import userdb
     monkeypatch.setattr(userdb, "DB_FILE", tmp_path / "safeher.sqlite3")
+
+
+_exit_status = 0
+
+
+def pytest_sessionfinish(session, exitstatus):
+    global _exit_status
+    _exit_status = int(exitstatus)
+
+
+def pytest_unconfigure(config):
+    # On Linux CI, a native thread (DuckDB / gRPC / Playwright) aborts while Python shuts down
+    # ("terminate called without an active exception", exit 134) after every test has passed.
+    # The results are already reported here, so leave without that teardown and keep pytest's own status.
+    if os.environ.get("CI"):
+        import sys
+        sys.stdout.flush(); sys.stderr.flush()
+        os._exit(_exit_status)
