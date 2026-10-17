@@ -183,7 +183,9 @@ def test_vertex_is_used_when_a_cloud_project_is_set(monkeypatch):
     from safeher import explain as ex
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "safeher-demo")
     monkeypatch.setenv("GEMINI_API_KEY", "also-set-but-vertex-wins")
+    from google.oauth2.credentials import Credentials as UserCredentials
     monkeypatch.setattr(ex, "_vertex_token", lambda: "tok")
+    monkeypatch.setattr(ex, "_adc", UserCredentials(token="tok"))  # gcloud login on a laptop
     url, headers = ex.gemini_target("gemini-x")
     assert url == ("https://aiplatform.googleapis.com/v1/projects/safeher-demo/locations/global/"
                    "publishers/google/models/gemini-x:generateContent")
@@ -265,3 +267,39 @@ def test_only_gemini_2_5_models_are_ever_used(monkeypatch):
     monkeypatch.setenv("CHATBOT_MODEL", "gemini-3.8-flash")
     with pytest.raises(RuntimeError):
         agents.model()
+
+
+
+def test_a_service_account_does_not_send_a_billing_project(monkeypatch):
+    """On Cloud Run, ADC is the service's own account: it bills its own project, and the
+    x-goog-user-project header would need an extra role, so it isn't sent."""
+    from google.oauth2 import service_account
+    from types import SimpleNamespace
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "safeher-demo")
+    monkeypatch.setattr(ex, "_vertex_token", lambda: "tok")
+    monkeypatch.setattr(ex, "_adc", SimpleNamespace(__class__=service_account.Credentials))
+    assert ex.gemini_target("gemini-x")[1] == {"Authorization": "Bearer tok"}
+
+
+
+def test_a_shared_vertex_api_key_comes_first_and_keeps_gemini_2_5(monkeypatch):
+    """VERTEX_API_KEY: one key a team shares, billed to the Cloud project, still serving Gemini 2.5
+    (AI Studio keys can't use 2.5 any more). It wins over a project login and an AI Studio key."""
+    monkeypatch.setenv("VERTEX_API_KEY", "vk")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "safeher-demo")
+    monkeypatch.setenv("GEMINI_API_KEY", "ai-studio")
+    url, headers = ex.gemini_target("gemini-2.5-flash")
+    assert url == "https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent"
+    assert headers == {"x-goog-api-key": "vk"}  # in a header, not the URL (URLs end up in logs)
+
+
+def test_herside_uses_the_shared_vertex_key_even_with_a_project_set(monkeypatch):
+    """From environment variables alone google-genai prefers a project login; HerSide passes the key
+    explicitly so the shared key is what's used."""
+    from safeher.chatbot import agents
+    monkeypatch.setenv("VERTEX_API_KEY", "vk")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "safeher-demo")
+    m = agents.model()
+    client = m.api_client._api_client
+    assert m.model == "gemini-2.5-flash" and client.vertexai and client.api_key == "vk" and client.project is None
+    assert agents.describe() == {"provider": "gemini", "model": "gemini-2.5-flash", "platform": "Vertex AI"}

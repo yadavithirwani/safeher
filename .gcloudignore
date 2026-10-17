@@ -1,0 +1,31 @@
+# What `gcloud run deploy --source .` must NOT upload to Cloud Build. (Without this file gcloud would use
+# .gitignore, which excludes data/safeher.duckdb, the one data file the server needs.)
+.git
+.gitignore
+.gcloudignore
+.dockerignore
+.claude/
+.DS_Store
+**/__pycache__/
+**/*.pyc
+README.md
+demo/
+docs/
+dashboard/
+scripts/
+firebase.json
+.firebaserc
+hosting/
+backend/.venv/
+backend/.env
+backend/.env.*
+backend/var/
+backend/tests/
+backend/*.egg-info/
+backend/*.md
+data/raw/
+data/*.building*
+data/*.wal
+backend/.hypothesis/
+backend/.pytest_cache/
+backend/cache/

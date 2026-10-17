@@ -35,6 +35,8 @@ def page():
                 route.abort()
         page.route('http://safeher.test/**', serve)
         page.goto('http://safeher.test/')
+        # The start-up screen is removed by app.js after the first plan; app.js isn't loaded here.
+        page.evaluate("document.getElementById('bootScreen')?.remove()")
         page.locator('#chatbotBtn').click()
         yield page
         browser.close()

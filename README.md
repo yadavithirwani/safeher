@@ -15,7 +15,7 @@ SafeHer compares routes not just by time and distance but by **street lighting, 
 | **Python 3.11+** and ~2 GB free disk | everything | python.org or `brew install python` |
 | **NASA Earthdata token** (free) | building the data (night lights) | Sign up at [urs.earthdata.nasa.gov](https://urs.earthdata.nasa.gov) → *Generate Token*. Then sign in once at [ladsweb.modaps.eosdis.nasa.gov](https://ladsweb.modaps.eosdis.nasa.gov) with the same account and accept the data licence, or downloads are redirected to the licence page. |
 | Google Maps API key *(optional)* | Google basemap, search suggestions, live "open now", Google route comparison, Street View | [Google Cloud console](https://console.cloud.google.com/google/maps-apis): create a project with billing, enable **Map Tiles API, Places API (New), Routes API, Street View Static API**, create a key and restrict it to those APIs. |
-| Gemini *(optional)*, either way | plain-language route explanations, and HerSide | **Recommended: Vertex AI with ADC.** Run Google's [ADC setup](https://cloud.google.com/docs/authentication/set-up-adc-local-dev-environment) (`gcloud auth application-default login`, enable the Vertex AI API), then set `GOOGLE_CLOUD_PROJECT` in `backend/.env`. No key is stored; usage is billed to your Cloud project. **Or** an AI Studio key in `GEMINI_API_KEY` ([Google AI Studio](https://aistudio.google.com/apikey); free tier has a low daily quota). |
+| Gemini *(optional)*, either way | plain-language route explanations, and HerSide | **Recommended: a shared Vertex AI API key** in `VERTEX_API_KEY` (ask the project owner; billed to the team's Cloud project), **or Vertex AI with ADC.** Run Google's [ADC setup](https://cloud.google.com/docs/authentication/set-up-adc-local-dev-environment) (`gcloud auth application-default login`, enable the Vertex AI API), then set `GOOGLE_CLOUD_PROJECT` in `backend/.env`. No key is stored; usage is billed to your Cloud project. **Or** an AI Studio key in `GEMINI_API_KEY` ([Google AI Studio](https://aistudio.google.com/apikey); free tier has a low daily quota). |
 | [Ollama](https://ollama.com) with `llama3.2:3b` *(optional)* | the **HerSide** chat companion, run locally | Install Ollama, then `ollama pull llama3.2:3b`. Settings in [backend/CHATBOT_README.md](backend/CHATBOT_README.md). |
 
 Without the optional keys the app runs fully on open data: a CARTO basemap (OpenStreetMap data), local search, and a fact-based summary instead of Gemini's explanation. A key that **is** set but fails (wrong, out of quota, API not enabled) is shown as an error, never silently replaced.
@@ -23,7 +23,7 @@ Without the optional keys the app runs fully on open data: a CARTO basemap (Open
 ### 1 · Install
 ```bash
 git clone https://github.com/yadavithirwani/safeher.git && cd safeher/backend
-python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev,build]"
 cp .env.example .env    # then paste your keys into backend/.env (gitignored; never commit it)
 ```
 
@@ -50,13 +50,33 @@ Open http://localhost:8765. Optional checks: `.venv/bin/python -m safeher.google
 
 Walks work anywhere inside **Delhi and Bengaluru**, up to 8 km. A trip elsewhere, or across the two cities, gets a clear message.
 
+### 4 · Deploy (optional)
+Firebase Hosting + Cloud Run (scales to zero: no cost when idle) + Firestore for reports and live trips. Guide and one script: [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ### Configuration
 Everything city- or model-specific lives in `config/`, not in code:
 - `cities.json`: supported cities (bbox, landmarks, default trip), data sources, OSM → NCRB district mapping. Add a city with one entry and a rebuild.
 - `scoring.json`: the published scoring model (weights, thresholds, routing limits).
 - `app.json`: app defaults (default city, departure time, trip limits, helplines, basemaps, languages).
 
-Secrets and machine settings go in `backend/.env` (see [`.env.example`](backend/.env.example)).
+Secrets and machine settings go in `backend/.env`. Every variable is documented in [`.env.example`](backend/.env.example).
+
+### External dependencies
+Everything SafeHer relies on outside this repo and `backend/.env`:
+
+| When | Dependency | Account / cost | If it's missing |
+|---|---|---|---|
+| Data build | Geofabrik OSM extracts, India Data Portal (NCRB), OpenCity (Bengaluru police) | none, free | build fails; the old database is kept |
+| Data build | NASA Earthdata / LAADS (Black Marble) | free account + token (expires every 60 days) + licence accepted once | build fails |
+| Data build | Python packages `osmium`, `blackmarblepy` (`.[build]` extra) | none | build fails |
+| Runtime | `data/safeher.duckdb`: built locally, gitignored, baked into the Cloud Run image | none | app won't start; rebuild it |
+| Runtime, browser | MapLibre GL 5 (jsDelivr CDN), CARTO basemap styles | none | no map tiles |
+| Runtime, optional | Google Maps Platform: Map Tiles, Places (New), Routes, Street View Static, Geocoding | Cloud project with billing | open-data basemap and search |
+| Runtime, optional | Vertex AI, Gemini 2.5 Flash / Flash-Lite (explanations, HerSide, scope check, Maps grounding) | Cloud project with billing; shared API key or ADC | template explanation; HerSide on Ollama |
+| Runtime, optional | Ollama (`llama3.2:3b`) for a local HerSide | none, runs on your computer | HerSide unavailable without Gemini |
+| Deploy | Google Cloud project `safeher-511808`: Cloud Run, Cloud Build, Artifact Registry, Firestore, Secret Manager, IAM, Firebase Hosting | trial billing account; `gcloud` and `firebase` CLIs signed in | see [docs/DEPLOY.md](docs/DEPLOY.md) |
+| Deploy | Org policy `iam.managed.disableServiceAccountApiKeyCreation` turned off for the project (to create the Vertex key) | org policy admin | the Vertex API key can't be created |
+| Tests | Playwright Chromium (`playwright install chromium`) | none | the web UI tests skip or fail |
 
 ## How it works
 
