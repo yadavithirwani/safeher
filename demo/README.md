@@ -1,5 +1,18 @@
 # Record the latest SafeHer demo
 
+## "Reached?" story demo (current)
+`record_story.py` records the pitch demo from [docs/DEMO_STORYLINE.md](../docs/DEMO_STORYLINE.md): Meera's real 1 km walk from Mahakavi Kuvempu Road metro at 10 PM and 11:30 PM, with live Gemini 2.5 explanations, HerSide, live sharing (simulated GPS, labelled) and SOS. It writes `docs/media/safeher-demo-reached.mp4` (about 4 min) and a poster.
+
+```bash
+# Server on Vertex AI with ADC (the shared VERTEX_API_KEY is ~10x slower and HerSide's scope check times out on it)
+cd backend && VERTEX_API_KEY= GOOGLE_CLOUD_PROJECT=safeher-511808 .venv/bin/uvicorn safeher.api:app --port 8765 --workers 2 --no-access-log
+# From the repository root:
+backend/.venv/bin/python demo/record_story.py --base http://localhost:8765
+```
+One run makes roughly 15–20 Gemini calls and a few Google Maps calls (real Google basemap). Captions read their numbers from the app.
+
+## Feature walkthrough (older)
+
 `record_demo.py` is the only recorder. It records the current UI from scratch—no previous video is needed—and publishes:
 
 - `docs/media/safeher-demo-herside.mp4`
