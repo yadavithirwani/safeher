@@ -102,13 +102,13 @@ More: [Architecture](docs/ARCHITECTURE.md) (data sources and the full request fl
 
 Initial Google ADK supervisor/specialist agents and `POST /api/chat` are implemented, with Ollama configuration, Google Maps tools and a model-independent SOS response. **Live Ollama/ADK/Places smoke checks have passed; model reliability and Geocoding configuration still need work.** Setup, tests and limitations: [backend/CHATBOT_README.md](backend/CHATBOT_README.md). Open **HerSide · Ask for help** above the route cards for nearby-place questions, selected-trip comparisons, one-shot location attachment and SOS call options. Chat context stays in memory, not browser storage; clearing the UI does not immediately delete the expiring server context. Frontend integration is an initial version, not a production emergency service.
 
-## Latest demo · SafeHer's 2:50 story-led walkthrough
+## Latest demo · SafeHer's 2:54 story-led walkthrough
 
 [![SafeHer with HerSide route comparison.](docs/media/safeher-final-demo-poster.jpg)](docs/media/safeher-final-demo.mp4)
 
-**[Watch the current demo](docs/media/safeher-final-demo.mp4)** — 2:50, 1920×1080, female AI narration and selectable English captions.
+**[Watch the current demo](docs/media/safeher-final-demo.mp4)** — 2:54, 1920×1080, female AI narration and selectable English captions.
 
-Priya's evening walk connects route alternatives, time-aware lighting, score evidence, checked Gemini explanations, Plan B, HerSide's real pre-trip comparison, Maps-grounded sources, opt-in sharing and SOS.
+Meera's late-night walk from Kuvempu Road metro connects route alternatives, time-aware lighting, score evidence, checked Gemini explanations, Plan B, HerSide's real pre-trip comparison, Maps-grounded sources, opt-in sharing and SOS.
 
 GPS is visibly simulated. The contact viewer is shown as status-only with a disclosed recording-network basemap limitation; real location updates and revocation were verified. No reports are submitted and no calls are initiated.
 

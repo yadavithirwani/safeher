@@ -353,7 +353,7 @@ Google tools require `GOOGLE_MAPS_API_KEY`, enabled APIs and billing. HTTPS veri
 - Sharing tokens/latest live GPS are not automatically supplied to chat. Chat's explicit one-shot attachment and continuous foreground sharing have separate consent/lifecycles. No calls, contact notifications or sharing start automatically.
 - Browser chat history/token stay in JavaScript memory, not local/session storage. Closing clears the attachment and pending UI request but retains the in-page conversation. Reload loses local chat state. “Clear this chat” resets browser history/token, **not immediate server deletion**; server context expires independently. Avoid logging chat bodies, credentials, provider URLs/queries or tokens.
 - Multi-turn context exists but is bounded; candidate confirmation, natural-language departure parsing, local-name tool selection and small-model reliability remain incomplete. Fuzzy search tools work independently of whether the model selects them correctly. No unrestricted web Q&A, verified refuge recommendations, nationwide scored routing, emergency dispatch or production authentication/abuse controls.
-- Verified demo question: **“For this walk, is the extra walking time worth it for better lighting and fewer weak stretches?”** The user attaches the selected trip through the UI, not coordinate text. Three consecutive live Ollama checks returned computed route comparisons. The [current 2:50 review cut](media/safeher-final-demo.mp4) uses Gemini and demonstrates the pre-trip trade-off, SOS, Plan B and labeled simulated GPS. Its contact viewer is status-only with a disclosed recording-network basemap limitation.
+- Verified demo question: **“For this walk, is the extra walking time worth it for better lighting and fewer weak stretches?”** The user attaches the selected trip through the UI, not coordinate text. Three consecutive live Ollama checks returned computed route comparisons. The [current 2:54 review cut](media/safeher-final-demo.mp4) uses Gemini and demonstrates the pre-trip trade-off, SOS, Plan B and labeled simulated GPS. Its contact viewer is status-only with a disclosed recording-network basemap limitation.
 
 ## 7. Other user-facing workflows
 
@@ -485,7 +485,7 @@ For follow-ups pass the returned `session_id` as a secret bearer capability. Opt
 | `app/web/chatbot.js`, `chatbot.css`, `index.html` | HerSide modal, one-shot GPS, session handling, source-labelled cards and explicit actions. |
 | `app/web/sharing.js`, `live.html`, `live.js` | Sender and recipient sharing experiences. |
 | `backend/tests/test_*.py` | API, routing, scoring, real-data, explanation, sharing, Plan B and adapter regressions. |
-| `demo/final_capture.py`, `demo/final_edit.py`, `demo/final_support_*.py` | Current scene capture, female neural narration, support capture and duration-checked edit; see `demo/README.md`. |
+| `demo/capture_demo.py`, `demo/build_demo.py`, `demo/final_edit.py` | Current scene capture, female neural narration, support capture and duration-checked edit; see `demo/README.md`. |
 
 Reference data is built locally into `data/safeher.duckdb` (not committed; `python -m safeher.data build`); runtime reports/trips are in `backend/var/safeher.sqlite3`. Provider settings/secrets are in ignored `backend/.env`, not documentation or source control. Graphs, edge-support and explanation caches are in-process; refreshing datasets generally requires a server restart to avoid old cached data.
 
@@ -508,7 +508,7 @@ From `backend/`, after the [Quickstart](../README.md#quickstart) (install, `.env
 - HerSide browser suite run separately: **7 passed** (keyboard/Escape/focus, mobile overflow, text-only rendering, actions/errors, explicit one-shot location). Separate execution avoids an observed native macOS subprocess crash after the mixed geospatial/API suite.
 - Live browser: pharmacy query returned three place cards, SOS worked, native modal/Escape worked, and no JavaScript errors were observed.
 - Live tools: Ollama structured calls, ADK delegation, missing-location clarification, Places/Details, walking Routes, demo-area planning and SOS passed smoke checks (before the city-wide data merge). Local resolver/nearby and forced-outage walking fallbacks were also exercised. These do not establish production reliability.
-- Historical demo validation: **4:54**, natural pre-trip trade-off Q&A; that earlier video has since been removed. The current review cut is **2:50** with Gemini and female neural narration; see `demo/FINAL_DEMO.md` for limitations.
+- Historical demo validation: **4:54**, natural pre-trip trade-off Q&A; that earlier video has since been removed. The current review cut is **2:54** with Gemini and female neural narration; see `demo/FINAL_DEMO.md` for limitations.
 
 ```bash
 # From backend/: isolated UI tests using installed Chrome
@@ -518,7 +518,7 @@ RUN_BROWSER_TESTS=1 PLAYWRIGHT_CHANNEL=chrome .venv/bin/python -m pytest tests/t
 .venv/bin/python -m safeher.chatbot.validate --chat
 
 # From repository root: re-edit the retained current capture (see demo/README.md)
-uv run --no-sync python demo/final_edit.py
+uv run --no-sync python demo/build_demo.py
 ```
 
 These are historical validation results, not a claim that tests were rerun for this documentation edit or that every future checkout/provider response will pass. See [README.md](../README.md) and [chatbot setup](../backend/CHATBOT_README.md) for installation and provider configuration.

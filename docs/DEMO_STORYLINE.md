@@ -1,25 +1,46 @@
-# Demo storyline (draft, about 3½ minutes)
+# Demo storyline: "Reached?" (source draft)
 
-One person, one evening, one decision: **Priya leaves a friend's birthday at Toit, Indiranagar, at 9:30 PM and wants to walk to her PG near Bob's Bar.** Every feature appears because she needs it at that moment, not as a tour of buttons. The former feature-by-feature recording has been removed. This draft inspired the current 2:50 cut; see [the final production brief](../demo/FINAL_DEMO.md).
+> The retained final cut is 2:54 and uses the complete-sentence script in [NARRATION.md](../demo/NARRATION.md). This source draft's 17 October numbers and scene timings are historical; the final cut uses verified 18 October results. See [FINAL_DEMO.md](../demo/FINAL_DEMO.md) for reconciled metrics and presentation limitations.
 
-| # | Time | Scene | What the viewer sees | Line on screen |
+Every woman in India knows the message: **"Reached?"** Every night, someone who loves her waits for one word back. SafeHer is about the 12 minutes between the station and that reply.
+
+**Meera, 24**, moved to Bengaluru from Mysuru for her first job. Her shift ends late. At **10:00 PM** she steps out of **Mahakavi Kuvempu Road metro** (Rajajinagar). Her PG is behind **Sri Vani Girls High School**, about 1 km away. A map app says 12 minutes. It doesn't say what those 12 minutes look like.
+
+All numbers below are real SafeHer output for that walk (17 Oct 2026 data). Nothing is staged except the simulated GPS in the live-sharing scene, which is labelled.
+
+| # | Time | Scene | What the viewer sees | Caption / voice-over |
 |---|---|---|---|---|
-| 1 | 0:00–0:15 | **The question maps don't ask** | Bengaluru, 9:30 PM, dark map. Toit → Bob's Bar typed into search (neighbourhoods shown under each result). | "Maps answer *how fast*. At 9:30 PM, Priya also wants to know *what's along the way*." |
-| 2 | 0:15–0:45 | **Three routes, scored** | Shortest, Most support and Alternative appear (plus Google's own route, scored by the same rules). Score badges, weak stretches in pink. | "Each route is checked every 50 m for lighting, transit, open places, past incidents and community reports." |
-| 3 | 0:45–1:05 | **Why the night looks different** | Zoom in: NASA night-light glow, streets mapped as lit, street lamps. Slide the time from 6 PM to 11:45 PM; scores move. | "Satellite night lights, mapped lamps and lit streets. At 11:45 PM fewer places are open, and the scores change." |
-| 4 | 1:05–1:40 | **Nothing is a black box** | Open *How is this calculated?* on Most support: the formula with its numbers (average of 145 stretches × 0.8 + weakest 10% × 0.2 = 97), lighting from 49% NASA / 40% lit tags / 11% lamps (83 lamps), the stops and open places used. Then the Gemini explanation with "Checked against this route's data". | "Every point of the score traces back to data you can see. Gemini only puts it into words, and it is fact-checked." |
-| 5 | 1:40–2:00 | **If she needs to stop** | Tap the weak stretch; Plan B: nearest likely-open help within 3 minutes; police and pharmacy along the route. | "Plan B: how far to a place that's likely open, all along the walk." |
-| 6 | 2:00–2:50 | **Ask HerSide** | Right-side panel, *Gemini 2.5 Flash · Vertex AI*. (a) "Is the longer route worth it?" → measured comparison (2 extra minutes, 88 vs 76). (b) "Which cafés near here stay open after 10 pm?" → answer **grounded with Google Maps**, sources listed. (c) "Is the beer good at Toit?" → polite refusal: safety only. | "HerSide answers from SafeHer's calculations and Google Maps, and only about safety." |
-| 7 | 2:50–3:20 | **Walking, with someone watching out** | Share live location → sister's viewer link (simulated GPS, labelled), STALE marker, stop sharing. Tap *I don't feel safe* → 112 immediately, no AI in the way. | "Opt-in sharing that ends when she says so. SOS never waits for a model." |
-| 8 | 3:20–3:35 | **Close** | Delhi switch for one beat (whole city), then the title card. | "All of Delhi and Bengaluru, 1.6 million street segments, open data plus Gemini on Vertex AI. Better-informed walks; never a promise of safety." |
+| 1 | 0:00–0:12 | **Cold open** | Black screen. A phone notification slides in: *Amma: Reached?* Then one line of data. | "Bengaluru police recorded **1,135 molestation cases in 2023, nearly double 2021's 573**." *(Bengaluru City Police, Crime in Bengaluru 2023)* |
+| 2 | 0:12–0:25 | **The walk home** | Map of Rajajinagar at night. Pin at the metro exit, pin at her PG. Search typed: *Mahakavi Kuvempu Road* → *Sri Vani Girls High School*. | "10 PM. Meera's PG is 1 km from the metro. Every map can tell her how fast. None can tell her what's on the way." |
+| 3 | 0:25–0:50 | **Two minutes, a different walk** | Three routes appear. **Shortest: 12 min, 66.** **Most support: 14 min, 89.** The shortest line cuts through side lanes. | "Two extra minutes. Nearly five times as many streets mapped as lit (13% → 63%). Three times as many places open on the way (10 → 33)." |
+| 4 | 0:50–1:15 | **See why** | Night-light glow, lit streets and lamps switch on. *How is this calculated?*: the formula with its real numbers, where each signal's data came from. | "NASA night-light satellites, OpenStreetMap lamps, live opening hours and transit. Every point of the score traces back to data you can open." |
+| 5 | 1:15–1:30 | **If something feels wrong** | Plan B on each route. | "On the shortest route, the nearest place likely to be open can be **5.4 minutes** away. On Most support, never more than **2.1**, with Subramanyanagar Police Station on the way." |
+| 6 | 1:30–1:55 | **11:30 PM** | Drag the time to 11:30 PM. Scores drop. A **653 m pink stretch** lights up on the shortest route, two-thirds of the walk. | "Same street. Same 12 minutes. But at 11:30 the shops are shut. **The street didn't change. The city around it did.** Shortest: 46. Most support: 59." |
+| 7 | 1:55–2:25 | **Ask HerSide** | Right panel, *Gemini 2.5 Flash · Vertex AI*. (a) "Is the longer route worth 2 minutes?" → a comparison from SafeHer's own numbers. (b) "Which cafés near Sri Vani Girls High School stay open after 11 pm?" → **grounded in Google Maps**, sources listed (a busy place to wait if she needs one). (c) "Recommend a movie for tonight?" → politely declines: walking safety only. | "HerSide answers from SafeHer's calculations and Google Maps, and stays on her walk home." |
+| 8 | 2:25–2:45 | **Someone walking with her** | *Share live location* → Amma's viewer link (simulated GPS, labelled). Then *I don't feel safe* → **112** in one tap, no AI in between. | "Amma watches the dot move. Sharing ends when Meera says so. SOS never waits for a model." |
+| 9 | 2:45–3:00 | **Reached** | Phone: *Meera: Reached ❤️*. Title card. | "SafeHer. Not the fastest way home: the one with more light, more people and more help along it. All of Delhi and Bengaluru, 1.6 million street segments, open data and Gemini on Vertex AI. Better-informed walks, never a promise of safety." |
 
-## What changes from the current recording
-- **One story:** Bengaluru with a person and a purpose, instead of jumping between Delhi and Bengaluru.
-- **Leads with the new strengths:** whole-city search, night lights, the score evidence, HerSide on Vertex with Maps grounding and its guardrail refusal.
-- **Shorter:** about 3½ minutes, down from 6:20. The Plan B and live-sharing chapters are cut to their key moments.
-- **Explanations and HerSide run live on Gemini 2.5**, no longer the template fallback, now that Vertex works.
+## Why this walk
+- **Real and ordinary:** a metro station to a PG, 1 km, 12–14 minutes. It's the walk thousands of women make every night, not a 37-minute trek nobody takes.
+- **The contrast is in the data, not the script:** found by scoring 35 metro → PG/hostel walks across Bengaluru at 10 PM and ranking by the gap between the shortest route and the best one. This walk had the largest gap for the smallest detour.
+- **Time matters:** the jump from 10 PM to 11:30 PM shows what no static map shows: the same street loses its open shops, and with them its support.
+
+### Numbers used (planner output, departure 17 Oct 2026)
+| | 10:00 PM Shortest | 10:00 PM Most support | 11:30 PM Shortest | 11:30 PM Most support |
+|---|---|---|---|---|
+| Time / distance | 12 min / 999 m | 14 min / 1,142 m | 12 min / 999 m | 13 min / 1,016 m |
+| Score | 66 | 89 | 46 | 59 |
+| Mapped as lit | 13% | 63% | 13% | 46% |
+| Places likely open on the way | 10 | 33 | 4 | 6 |
+| Weak stretches | none | none | 653 m | 133 m |
+| Longest walk to likely-open help (Plan B) | 5.4 min | 2.1 min | 5.4 min | 3.5 min |
+
+Backups with similar contrast: Cubbon Park metro → Locul Hostel Central (11 vs 12 min, 71 vs 81 at 10:30 PM); Krishna Rajendra Market metro → a PG on the market side (11 vs 13 min, 66 vs 76).
+
+## Words to keep, words to avoid
+- Say "more support", "better lit", "more places open", "weak stretch". Never call a street or area "safe", "unsafe" or "dangerous". The app enforces this for Gemini; the pitch follows the same rule.
+- The cold-open statistic is city-wide context. SafeHer doesn't use it to score streets, because no district split is published.
 
 ## Before recording
-- Bob's Bar has several branches; the script picks the one in Doopanahalli (Indiranagar), about 1.3 km from Toit.
-- Check that Gemini 2.5 Flash explanations pass the fact checks reliably. One of 2 failed in a quick check on 17 Oct (a number not in the data); fix the prompt first if that repeats.
-- **Cost:** one recording run is roughly 15–20 Gemini calls (explanations, HerSide's three questions and their scope checks) plus a few Google Maps grounding queries. Allow 2–3 runs.
+- Check that Gemini 2.5 explanations pass the fact checks on this walk (the signal-difference fix of 17 Oct should cover "open places score 27 vs 88").
+- **Cost:** one run is about 15–20 Gemini calls (explanations, three HerSide questions and their scope checks) plus a few Maps grounding queries. Allow 2–3 runs. Ask before running.

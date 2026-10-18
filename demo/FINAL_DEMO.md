@@ -1,80 +1,43 @@
-# Final demo production brief
+# Current demo: Reached?
 
-**Target: 2:50 (170 seconds), strictly below 3:00.**
+- Source story: `docs/DEMO_STORYLINE.md`.
+- Current output: `docs/media/safeher-final-demo.mp4`.
+- Captions: `docs/media/safeher-final-demo.srt`.
+- Target/measured runtime: 174 seconds / approximately 174.021 seconds.
+- Only the latest narrated cut is retained on `main-anushka-demo`. Earlier tracked cuts remain available on `main-anushka` and in Git history.
+- Voice: female Indian-English `en-IN-NeerjaNeural` via edge-tts, regenerated at normal speed (`+0%`). Every scene has at least 0.7 seconds of room after narration; the editor rejects slots that would require acceleration. The revised script uses complete sentences and a connected Meera/Amma story instead of fragments or spoken metric lists. ElevenLabs API access was not configured; no ElevenLabs account or subscription was created.
 
-## Story
+## Capture and integrity
 
-A night out should end with memories, not a mental checklist of dark streets and places to ask for help. Priya leaves a friend's birthday at Toit, Indiranagar, Bengaluru at 9:30 PM and wants to walk to her PG near Bob's Bar in Doopanahalli. Each feature answers a question she has along that journey.
+User approved up to three live recording runs. Two setup attempts failed before usable scene capture; the third completed. No additional paid capture runs were launched. Temporary sharing access was revoked (GET returned 404); no calls were placed or reports submitted.
 
-The app's location search uses Bob's Bar as a nearby landmark, not Priya's actual home. Priya is a fictional demo persona; sharing uses visibly labeled simulated browser GPS.
+This review cut uses verified real UI stills and editorial metric panels, not continuous screen recording. The opening/closing message cards are storytelling graphics. Google Maps grounding is shown as an explicitly labeled transcript of the actual captured response: the browser screenshot had scrolled to unrelated tool-result cards and was deliberately not presented as grounding evidence. Displayed source names are a selection of response citations.
 
-## Edit decision list
+Sharing uses simulated GPS near the actual route with successful live location PUT/GET. It is presented as status-only; a rendered contact basemap or moving dot is not claimed. This differs from the draft's requested moving-map scene.
 
-| Time | Scene | Proof on screen |
-|---|---|---|
-| 0:00–0:15 | Motivation | Opening title and the shortest-route question |
-| 0:15–0:35 | Priya's trip | Bengaluru, Toit → Bob's Bar, 21:30; real route alternatives |
-| 0:35–0:50 | Time and lighting | Departure change; time-aware route evidence |
-| 0:50–1:10 | Transparent scores + Gemini | Formula, source evidence, checked Gemini explanation |
-| 1:10–1:23 | Plan B | Reachable help coverage and disclosed limitations |
-| 1:23–1:52 | HerSide | Selected-trip attachment; genuine computed route comparison |
-| 1:52–2:07 | Maps grounding | Practical venue-context answer with returned sources |
-| 2:07–2:26 | Private live sharing | Consent, labeled simulated GPS, contact status, stop sharing |
-| 2:26–2:35 | Urgent support | 112 information, without starting a call |
-| 2:35–2:50 | Close | Delhi / Bengaluru coverage and honest promise |
+## Reconciled numbers
 
-## HerSide question
+The deployed app supports departure time but not historical date selection. Captured plans use 18 October 2026, not the draft's 17 October snapshot.
 
-> For this walk, is the extra walking time worth it for better lighting and fewer weak stretches?
+| Metric | Shortest, 10 PM | Most support, 10 PM | Shortest, 11:30 PM | Most support, 11:30 PM |
+|---|---|---|---|---|
+| Minutes | 13 | 15 | 13 | 13 |
+| Score | 67 | 89 | 46 | 58 |
+| Mapped lighting | 12.7% | 61.2% | 12.7% | 44.7% |
+| Likely-open places | 11 | 34 | 4 | 6 |
+| Weak stretch | none | none | 653 m | 133 m |
+| Maximum Plan B walk | 5.4 min | 2.1 min | 5.4 min | 3.5 min |
 
-Use **Compare my selected trip** so the origin, destination and departure are attached as structured context. Record a real response. Don't script numeric claims before the actual plan is known.
+The app rounds some distances and minutes upward in prose. Editorial panels distinguish exact metrics and selected-route versus shortest-route data.
 
-Optional second question:
+The opening card's city-wide context uses the same combined category as the app: **1,195 molestation and insulting-modesty cases in 2023 versus 592 in 2021**. The draft's 1,135/573 narrower molestation-only figures were not substituted into the combined-category context. These figures are not street-level scoring inputs.
 
-> At Toit after 10pm, what safety support is available from staff, and is the venue open then?
+## Build
 
-Include this only if the real response has attributable Maps sources. If not, revise the narration and scene budget; never show a generic answer while claiming grounding.
+```bash
+uv run --no-sync python demo/build_demo.py
+```
 
-## Audio and pacing
+Requires the retained ignored capture `demo/out/updated/capture-20261018-150520/manifest.json`, images, ffmpeg, Pillow and edge-tts. The editor reuses shared final-edit utilities with the current capture workspace and publication path.
 
-- Female Indian-English neural narration: `en-IN-NeerjaNeural`.
-- Script source: `demo/final_story.json`.
-- Synthesized scene files: `demo/out/final/audio/`.
-- Avoid speeding narration above 1.18×. Rewrite long sentences instead.
-- Compress typing/loading/repeated movement; leave key evidence and HerSide results readable.
-- No music necessary: clear voice, real UI, and restrained chapter headings.
-- Scene-timed SRT and a selectable MP4 subtitle track are generated; timing is approximate, not word-level alignment.
-
-## Production tools
-
-- `demo/final_capture.py`: real deployed-app browser capture, scene clips, manifest, session cleanup.
-- `demo/final_edit.py --audio-only`: synthesize narration and inspect timing.
-- `demo/final_edit.py`: assemble captures, chapter headings, narration and subtitles; verify runtime and decode output.
-- Generated files remain under ignored `demo/out/final/` until reviewed.
-- The legacy demo has been removed; the current review cut is retained in `docs/media/`.
-
-## Current review cut
-
-- Current copy: `docs/media/safeher-final-demo.mp4`; editable output: `demo/out/final/safeher-final-demo.mp4`; measured runtime **170.033 seconds (2:50)**.
-- 1920×1080 H.264 video, female neural AAC narration, selectable English subtitle track and separate SRT.
-- Actual deployed Gemini explanation, pre-trip tool response and Maps-grounded response captured successfully.
-- Sharing validated with real location PUT/GET and post-revocation 404; browser GPS is simulated and visibly labeled.
-- **Recording-network limitation:** CARTO DNS fails, so the contact viewer is shown as a status-only crop with an explicit basemap-unavailable disclosure. No rendered contact map is claimed.
-- The SOS dialog and enlarged viewer status use freeze frames extracted from the successful live capture for readability. These are real UI states, not constructed answers.
-- Not every button is demonstrated: report submission is deliberately avoided; nearby assistance appears through Plan B and HerSide. The original storyline's extra refusal question is omitted to preserve the time budget.
-- This is a review cut until the owner approves the network-limited viewer presentation. Previous demo versions and the legacy recorder have been removed.
-
-## Release checks
-
-- [ ] Runtime measured by ffprobe is strictly below 180 seconds.
-- [ ] Full video decodes without errors; audio exists and is intelligible.
-- [ ] Inspect every scene for legible evidence, correct crop and transition timing.
-- [ ] HerSide is a real pre-trip response, not unavailable/fallback text.
-- [ ] Gemini explanation is genuinely Gemini-backed and checked.
-- [ ] Grounding claim matches visible citations.
-- [ ] Location simulation is visibly labeled on sender and viewer.
-- [ ] Viewer credentials are not exposed; all temporary sessions are revoked.
-- [ ] No reports submitted and no phone calls initiated.
-- [ ] No claims of guaranteed safety, background tracking or emergency dispatch.
-
-This brief adapts [the original storyline](../docs/DEMO_STORYLINE.md); it does not replace it.
+Before hackathon submission: watch the full updated cut and approve its still-frame presentation and disclosed status-only sharing scene. Full decode, duration and sampled visual checks do not replace a human playback/listening review.

@@ -1,8 +1,7 @@
 """Synthesize scene narration and assemble a duration-checked, captioned demo.
 
-Usage: uv run --no-sync python demo/final_edit.py --audio-only
-       uv run --no-sync python demo/final_edit.py
-Capture is supplied by final_capture.py; no UI or model results are fabricated.
+Build the current demo with: uv run --no-sync python demo/build_demo.py
+This module supplies shared voice, caption and encoding utilities.
 """
 from __future__ import annotations
 
@@ -109,7 +108,7 @@ def stamp(seconds: float) -> str:
 def assemble(story: dict) -> None:
     manifests = sorted(OUT.glob('capture*/manifest.json'), key=lambda p: p.stat().st_mtime)
     if not manifests:
-        raise ValueError('No successful capture manifest; run final_capture.py first')
+        raise ValueError('No successful capture manifest; run capture_demo.py first')
     capture = json.loads(manifests[-1].read_text())
     edits = OUT / "edit"
     edits.mkdir(exist_ok=True)

@@ -1,175 +1,179 @@
 1
-00:00:00,000 --> 00:00:03,516
-A night out should end with memories, not a
+00:00:00,000 --> 00:00:03,036
+Have you reached home? For Meera, that message from
 
 2
-00:00:03,516 --> 00:00:07,032
-mental checklist of dark streets and places to ask
+00:00:03,036 --> 00:00:06,072
+her mother is part of every late night. Behind
 
 3
-00:00:07,032 --> 00:00:10,548
-for help. That's why we built SafeHer. Because getting
+00:00:06,072 --> 00:00:09,108
+those simple words is someone waiting to know she
 
 4
-00:00:10,548 --> 00:00:14,064
-home is about more than finding the shortest route.
+00:00:09,108 --> 00:00:12,144
+is home.
 
 5
-00:00:15,000 --> 00:00:18,739
-Meet Priya. She's leaving a friend's birthday at Toit,
+00:00:13,000 --> 00:00:16,126
+It is ten at night in Bengaluru. Meera has
 
 6
-00:00:18,739 --> 00:00:22,478
-in Bengaluru, at nine thirty, and walking to her
+00:00:16,126 --> 00:00:19,252
+just left Kuvempu Road metro station. Her room near
 
 7
-00:00:22,478 --> 00:00:26,218
-P G near Bob's Bar. SafeHer compares walking alternatives
+00:00:19,252 --> 00:00:22,378
+Sri Vani Girls High School is about a kilometre
 
 8
-00:00:26,218 --> 00:00:29,957
-using lighting, transit, support places, historical incidents, and community
+00:00:22,378 --> 00:00:25,504
+away.
 
 9
-00:00:29,957 --> 00:00:33,696
-reports.
+00:00:27,000 --> 00:00:30,499
+The shortest walk takes thirteen minutes. Another route adds
 
 10
-00:00:35,000 --> 00:00:38,600
-The context changes with her departure time. Satellite night
+00:00:30,499 --> 00:00:33,998
+just two minutes, but its score rises from sixty-seven
 
 11
-00:00:38,600 --> 00:00:42,200
-lights, mapped lighting, and opening hours inform the picture.
+00:00:33,998 --> 00:00:37,498
+to eighty-nine. With more mapped lighting and more places
 
 12
-00:00:42,200 --> 00:00:45,800
-Missing evidence stays visible. A score is context, not
+00:00:37,498 --> 00:00:40,997
+likely to be open, Meera can see what those
 
 13
-00:00:45,800 --> 00:00:49,400
-a promise that a street is safe.
+00:00:40,997 --> 00:00:44,496
+extra minutes offer.
 
 14
-00:00:50,000 --> 00:00:53,850
-Priya can inspect the score, its weakest stretches, and
+00:00:46,000 --> 00:00:49,811
+Meera can inspect the lighting, transit and opening-hours evidence
 
 15
-00:00:53,850 --> 00:00:57,699
-the evidence behind it. SafeHer computes the numbers. Gemini
+00:00:49,811 --> 00:00:53,622
+behind each score. SafeHer calculates the numbers, and Gemini
 
 16
-00:00:57,699 --> 00:01:01,549
-two point five Flash on Vertex A I explains
+00:00:53,622 --> 00:00:57,434
+explains the trade-offs. Each explanation is checked against the
 
 17
-00:01:01,549 --> 00:01:05,398
-the trade-offs in English or Hindi. Those explanations are
+00:00:57,434 --> 00:01:01,245
+actual route data, rather than treated as a promise
 
 18
-00:01:05,398 --> 00:01:09,248
-checked against the route's actual facts.
+00:01:01,245 --> 00:01:05,056
+of safety.
 
 19
-00:01:10,000 --> 00:01:13,100
-And if she needs to stop? Plan B checks
+00:01:06,000 --> 00:01:09,222
+If she needs to stop, Plan B estimates the
 
 20
-00:01:13,100 --> 00:01:16,200
-walking-network access to places that may be open along
+00:01:09,222 --> 00:01:12,444
+walk to places where help may be available. The
 
 21
-00:01:16,200 --> 00:01:19,300
-her route. It highlights gaps, instead of assuming that
+00:01:12,444 --> 00:01:15,666
+longest gap falls from over five minutes to just
 
 22
-00:01:19,300 --> 00:01:22,400
-a nearby dot means reachable help.
+00:01:15,666 --> 00:01:18,888
+over two on the route with more support.
 
 23
-00:01:23,000 --> 00:01:26,891
-Before leaving, Priya asks HerSide: Is the extra walking
+00:01:20,000 --> 00:01:23,653
+At eleven thirty, shops have closed and both routes
 
 24
-00:01:26,891 --> 00:01:30,783
-time worth it for better lighting and fewer weak
+00:01:23,653 --> 00:01:27,306
+lose support. The shortest route now includes a long
 
 25
-00:01:30,783 --> 00:01:34,674
-stretches? She attaches this trip, so the question has
+00:01:27,306 --> 00:01:30,958
+stretch with fewer support options. The street has not
 
 26
-00:01:34,674 --> 00:01:38,566
-real context. Google's Agent Development Kit coordinates Gemini-powered specialists
+00:01:30,958 --> 00:01:34,611
+changed, but the city around it has. That is
 
 27
-00:01:38,566 --> 00:01:42,457
-and validated tools. The answer compares computed route evidence,
+00:01:34,611 --> 00:01:38,264
+why her departure time matters.
 
 28
-00:01:42,457 --> 00:01:46,349
-not an invented safety verdict. Priya stays in control
+00:01:39,000 --> 00:01:42,912
+Meera asks HerSide whether the longer route is worth
 
 29
-00:01:46,349 --> 00:01:50,240
-of the decision.
+00:01:42,912 --> 00:01:46,824
+two extra minutes. With her trip attached, the assistant
 
 30
-00:01:52,000 --> 00:01:54,880
-For place-specific questions, HerSide can use Google Maps grounding
+00:01:46,824 --> 00:01:50,736
+compares the actual routes and explains the difference.
 
 31
-00:01:54,880 --> 00:01:57,760
-and show its sources. It focuses on practical context,
+00:01:52,000 --> 00:01:55,216
+She can also ask which cafés stay open late.
 
 32
-00:01:57,760 --> 00:02:00,640
-such as opening hours and available support, with a
+00:01:55,216 --> 00:01:58,432
+HerSide uses Google Maps information and provides sources she
 
 33
-00:02:00,640 --> 00:02:03,520
-topic guard that keeps the assistant focused on walking
+00:01:58,432 --> 00:02:01,648
+can check.
 
 34
-00:02:03,520 --> 00:02:06,400
-safety.
+00:02:03,000 --> 00:02:06,132
+When asked for a movie recommendation, it politely stays
 
 35
-00:02:07,000 --> 00:02:11,290
-Priya shares a private location link with someone she
+00:02:06,132 --> 00:02:09,264
+focused on walking safety.
 
 36
-00:02:11,290 --> 00:02:15,580
-trusts. This demo uses simulated G P S. Sharing
+00:02:10,000 --> 00:02:14,392
+Meera shares her location with her mother while the
 
 37
-00:02:15,580 --> 00:02:19,870
-is opt-in and foreground-only, stores only the latest point,
+00:02:14,392 --> 00:02:18,784
+page stays open. She can stop sharing whenever she
 
 38
-00:02:19,870 --> 00:02:24,160
-and expires after two hours. Stop sharing revokes access.
+00:02:18,784 --> 00:02:23,176
+chooses. This demonstration uses simulated location updates.
 
 39
-00:02:26,000 --> 00:02:30,176
-Urgent help never waits for A I. One one
+00:02:24,000 --> 00:02:27,288
+Emergency call options are always available, without waiting for
 
 40
-00:02:30,176 --> 00:02:34,352
-two opens the phone dialler. No automatic emergency dispatch.
+00:02:27,288 --> 00:02:30,576
+an AI response.
 
 41
-00:02:35,000 --> 00:02:38,600
-Delhi and Bengaluru. Open geospatial data, Google Maps, and
+00:02:32,000 --> 00:02:35,331
+Finally, Meera sends the reply her mother has been
 
 42
-00:02:38,600 --> 00:02:42,200
-Gemini on Vertex A I. SafeHer doesn't promise safety.
+00:02:35,331 --> 00:02:38,662
+waiting for. I have reached home. SafeHer helps women
 
 43
-00:02:42,200 --> 00:02:45,800
-It makes the evidence clearer, so women can make
+00:02:38,662 --> 00:02:41,994
+in Delhi and Bengaluru understand their options, so the
 
 44
-00:02:45,800 --> 00:02:49,400
-better-informed choices about their walk home.
+00:02:41,994 --> 00:02:45,325
+walk home is a better-informed choice, never a promise
+
+45
+00:02:45,325 --> 00:02:48,656
+of safety.
