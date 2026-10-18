@@ -242,6 +242,21 @@ function setPoint(which, p) {
   placeEndpoint(which);
 }
 
+/* "Current location" in the search lists: one GPS reading when picked, never tracked. Browsers allow it
+   only on HTTPS or localhost. */
+const canLocate = () => !!navigator.geolocation && window.isSecureContext;
+function currentLocation() {
+  return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition((fix) => {
+    const { latitude: lat, longitude: lon, accuracy } = fix.coords;
+    const city = state.cities.find(({ bbox: [w, s, e, n] }) => lon >= w && lon <= e && lat >= s && lat <= n);
+    if (!city) return reject(new Error(`You seem to be outside ${state.cities.map((c) => c.name).join(" and ")}. SafeHer has street data for those cities only.`));
+    resolve({ name: "Current location", lat, lon, accuracy, city_id: city.id });
+  }, (err) => reject(new Error(err.code === 1
+    ? "Location is blocked for this site. Allow it in your browser settings, or type a place."
+    : "Couldn’t get your location. Try again, or type a place.")),
+  { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }));
+}
+
 function setupSearch(inputSel, listSel, which) {
   const input = $(inputSel), list = $(listSel);
   // `itemsFor` is the text the suggestions belong to; `seq` drops replies for text that has since changed.
@@ -256,16 +271,25 @@ function setupSearch(inputSel, listSel, which) {
         <small>SafeHer has data for ${esc(state.cities.map((c) => c.name).join(" and "))} only.</small></div></li>`;
       return;
     }
-    const glyph = (r) => (r.source === "google" ? "travel_explore" : r.kind === "landmark" ? "location_on"
-      : r.kind === "street" ? "add_road" : "place");
-    list.innerHTML = items.map((r, i) => `<li role="option" data-i="${i}" aria-selected="${i === active}">
+    const glyph = (r) => (r.kind === "here" ? "my_location" : r.source === "google" ? "travel_explore"
+      : r.kind === "landmark" ? "location_on" : r.kind === "street" ? "add_road" : "place");
+    list.innerHTML = items.map((r, i) => `<li role="option" data-i="${i}" aria-selected="${i === active}"${r.kind === "here" ? ' class="here"' : ""}>
       ${icon(glyph(r))}<div><b>${esc(r.name)}</b><small>${esc(r.detail)}${r.other_city ? " · switches city" : ""}</small></div></li>`).join("")
       + (items.some((r) => r.source === "google") ? `<li class="powered-by" aria-hidden="true">Search results include Google Maps</li>` : "");
   };
   let session = null; // Google Autocomplete session: one per search, ended by a Place Details call
+  let locating = false;
   const choose = async (r) => {
     query.cancel(); seq++; // a pending or in-flight search must not reopen the list
     items = []; itemsFor = null; empty = ""; render(); input.blur();
+    if (r.kind === "here") {
+      if (locating) return;
+      locating = true; input.value = "Finding your location…";
+      try { r = await currentLocation(); }
+      catch (err) { toast(err.message); input.value = state[which]?.name || ""; return; }
+      finally { locating = false; }
+      toast(`Using your current location (±${Math.round(r.accuracy)} m)`);
+    }
     if (r.place_id) {
       try {
         const p = await api(`/api/google/place/${encodeURIComponent(r.place_id)}?session=${session || ""}`);
@@ -276,7 +300,9 @@ function setupSearch(inputSel, listSel, which) {
     setPoint(which, { name: r.name, lat: r.lat, lon: r.lon });
     planTrip(true);
   };
-  const landmarkItems = () => state.city.landmarks.map((l) => ({ ...l, kind: "landmark", detail: `landmark · ${state.city.name}` }));
+  const here = { kind: "here", name: "Current location", detail: "Use your phone’s location, once" };
+  const landmarkItems = () => [...(canLocate() ? [here] : []),
+    ...state.city.landmarks.map((l) => ({ ...l, kind: "landmark", detail: `landmark · ${state.city.name}` }))];
   const search = async () => {
     const q = input.value.trim();
     const mine = ++seq;
@@ -310,7 +336,7 @@ function setupSearch(inputSel, listSel, which) {
     }
     else if (e.key === "Escape") { items = []; render(); input.blur(); }
   });
-  input.addEventListener("blur", () => setTimeout(() => { items = []; empty = ""; render(); if (state[which]) input.value = state[which].name; }, 150));
+  input.addEventListener("blur", () => setTimeout(() => { items = []; empty = ""; render(); if (state[which] && !locating) input.value = state[which].name; }, 150));
   list.addEventListener("mousedown", (e) => {
     const li = e.target.closest("li[data-i]"); if (li) { e.preventDefault(); choose(items[Number(li.dataset.i)]); }
   });
@@ -428,10 +454,11 @@ function fitTo(latlons) {
   latlons.forEach(([a, c]) => b.extend([c, a]));
   const phone = isPhone();
   map.fitBounds(b, { padding: phone
-    ? { top: 70, bottom: (parseInt(getComputedStyle(document.documentElement).getPropertyValue("--sheet-h")) || 0) + 30, left: 24, right: 76 }
+    ? { top: 70, bottom: sheet.mapPad() + 30, left: 24, right: 76 }
     : { top: 80, bottom: 70, left: 408 + 60, right: 140 }, maxZoom: 16.5, duration: 700 });
 }
 function flyToPoint(lat, lon, title) {
+  sheet.reveal();
   map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 16), duration: 600 });
   if (title) new maplibregl.Popup({ closeButton: false, offset: 18 }).setLngLat([lon, lat])
     .setHTML(`<div class="popup-title">${esc(title)}</div>`).addTo(map);
@@ -619,6 +646,7 @@ function showWeak(i) {
   const coords = s >= 0 && e >= s ? pieces.slice(s, e + 1).flatMap((p) => p.coords) : [w.start, w.end];
   map.getSource("weak").setData({ type: "FeatureCollection", features: [{ type: "Feature", properties: {},
     geometry: { type: "LineString", coordinates: coords.map(([a, b]) => [b, a]) } }] });
+  sheet.reveal();
   fitTo(coords);
 }
 
@@ -783,9 +811,9 @@ function startReport(point = null) {
   $("#view").querySelectorAll("[data-cat]").forEach((b) => b.addEventListener("click", () => {
     state.reportCat = b.dataset.cat;
     if (state.reportPoint) submitReport(state.reportPoint);
-    else { state.mode = "report-place"; showBanner(`Tap the map where it is: ${REPORT_CATS[state.reportCat].label.toLowerCase()}`); }
+    else { state.mode = "report-place"; sheet.set("peek"); showBanner(`Tap the map where it is: ${REPORT_CATS[state.reportCat].label.toLowerCase()}`); }
   }));
-  if (isPhone()) $("#panel").classList.remove("collapsed");
+  if (sheet.pos === "peek") sheet.set("half");
 }
 
 async function submitReport(pt) {
@@ -901,16 +929,82 @@ function readHash() {
 }
 
 /* ---------- sheet (phones) ---------- */
+/* A Google Maps-style bottom sheet resting at three heights: peek (the trip fields), half and full. It
+   follows the finger and settles on the nearest height, or the next one after a flick. Only a full sheet
+   scrolls its content; pulling down from the top of that content, or on the handle, lowers it again. */
+const sheet = { pos: "half", set() {}, reveal() {}, mapPad: () => 0 };
+
 function setupSheet() {
-  const panel = $("#panel");
-  const update = () => document.documentElement.style.setProperty("--sheet-h", isPhone() ? `${panel.getBoundingClientRect().height}px` : "0px");
-  new ResizeObserver(update).observe(panel);
-  addEventListener("resize", update);
-  $("#sheetHandle").addEventListener("click", () => {
-    if (panel.classList.contains("expanded")) { panel.classList.remove("expanded"); panel.classList.add("collapsed"); }
-    else if (panel.classList.contains("collapsed")) panel.classList.remove("collapsed");
-    else panel.classList.add("expanded");
-  });
+  const panel = $("#panel"), order = ["peek", "half", "full"];
+  let shown = 0, drag = null, wheelAt = 0;  // shown: visible height of the sheet, px
+  const heights = () => {
+    const full = panel.clientHeight, dir = $(".directions");
+    const peek = Math.min(full, dir.offsetTop + dir.offsetHeight + 12);
+    return { peek, half: Math.max(peek, Math.round(full * 0.48)), full };
+  };
+  const show = (px) => {
+    const h = heights(), phone = isPhone();
+    shown = Math.max(h.peek, Math.min(h.full, px));
+    panel.style.transform = phone ? `translateY(${h.full - shown}px)` : "";
+    panel.classList.toggle("high", phone && shown > h.full - 200);
+    document.documentElement.style.setProperty("--sheet-h", phone ? `${shown}px` : "0px");
+  };
+  sheet.set = (pos) => {
+    sheet.pos = pos;
+    panel.classList.toggle("full", pos === "full");
+    if (pos !== "full") panel.scrollTop = 0;
+    show(heights()[pos]);
+  };
+  sheet.reveal = () => { if (sheet.pos === "full") sheet.set("half"); };  // before showing something on the map
+  sheet.mapPad = () => (isPhone() ? Math.min(shown, heights().half) : 0);  // map padding: never the full sheet
+  new ResizeObserver(() => { if (!drag?.on) sheet.set(sheet.pos); }).observe(panel);
+  sheet.set(sheet.pos);
+
+  $("#sheetHandle").addEventListener("click", () => sheet.set({ half: "full", full: "peek", peek: "half" }[sheet.pos]));
+
+  panel.addEventListener("touchstart", (e) => {
+    drag = null;
+    if (!isPhone() || e.touches.length > 1 || e.target.closest(".suggest, input[type=range]")) return;
+    const t = e.touches[0];
+    drag = { x: t.clientX, y: t.clientY, from: shown, last: t.clientY, at: e.timeStamp, v: 0, on: false,
+      handle: !!e.target.closest(".sheet-handle") };
+  }, { passive: true });
+  panel.addEventListener("touchmove", (e) => {
+    if (!drag) return;
+    const t = e.touches[0], dy = t.clientY - drag.y;
+    if (!drag.on) {  // decided on the first move, while the browser can still be stopped from scrolling
+      const sideways = Math.abs(t.clientX - drag.x) > Math.abs(dy);
+      const scrolls = sheet.pos === "full" && !drag.handle && !(panel.scrollTop <= 0 && dy > 0);
+      if (sideways || scrolls) { drag = null; return; }
+      drag.on = true;
+      panel.classList.add("dragging");
+    }
+    e.preventDefault();
+    if (e.timeStamp > drag.at) drag.v = (t.clientY - drag.last) / (e.timeStamp - drag.at);  // px/ms, + is down
+    drag.last = t.clientY; drag.at = e.timeStamp;
+    show(drag.from - dy);
+  }, { passive: false });
+  const end = () => {
+    if (!drag?.on) { drag = null; return; }
+    const h = heights(), v = drag.v;
+    drag = null;
+    panel.classList.remove("dragging");
+    if (v < -0.4) sheet.set(order.find((p) => h[p] > shown + 1) || "full");  // a flick: the next height that way
+    else if (v > 0.4) sheet.set([...order].reverse().find((p) => h[p] < shown - 1) || "peek");
+    else sheet.set(order.reduce((a, b) => (Math.abs(h[b] - shown) < Math.abs(h[a] - shown) ? b : a)));
+  };
+  panel.addEventListener("touchend", end);
+  panel.addEventListener("touchcancel", end);
+
+  // Mouse wheel or trackpad (a narrow desktop window): one step per gesture.
+  panel.addEventListener("wheel", (e) => {
+    const quiet = e.timeStamp - wheelAt > 300;
+    wheelAt = e.timeStamp;
+    if (!isPhone() || (sheet.pos === "full" && !(panel.scrollTop <= 0 && e.deltaY < 0))) return;
+    e.preventDefault();
+    const next = order[order.indexOf(sheet.pos) + (e.deltaY > 0 ? 1 : -1)];
+    if (quiet && next) sheet.set(next);
+  }, { passive: false });
 }
 
 /* ---------- boot ---------- */

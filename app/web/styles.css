@@ -116,6 +116,7 @@ button { cursor: pointer; }
 .suggest li { display: flex; gap: 12px; align-items: center; padding: 8px 14px; cursor: pointer; }
 .suggest li[aria-selected="true"], .suggest li:hover { background: var(--surface-2); }
 .suggest .msr { color: var(--text-2); }
+.suggest .here .msr { color: var(--primary); }
 .suggest .suggest-empty { cursor: default; align-items: flex-start; }
 .suggest .suggest-empty:hover { background: transparent; }
 .suggest b { display: block; font-weight: 500; font-size: 14px; }
@@ -369,20 +370,31 @@ details.notes ul { padding-left: 18px; margin: 6px 0 0; }
 /* ---------- Phones: panel becomes a bottom sheet ---------- */
 @media (max-width: 760px) {
   :root { --panel-w: 0px; }
+  /* A Google Maps-style sheet: it spans the screen and setupSheet() (app.js) slides it down so only its top
+     shows (peek, half or full). Only a full sheet scrolls, and as one: inputs, routes and details together. */
   .panel {
-    top: auto; left: 0; right: 0; bottom: 0; width: auto;
-    max-height: 48vh; border-radius: 20px 20px 0 0;
-    transition: max-height .25s ease;
+    inset: 0; width: auto; border-radius: 20px 20px 0 0;
+    transform: translateY(52%); transition: transform .25s ease, border-radius .25s ease;
     padding-bottom: env(safe-area-inset-bottom);
+    overflow-y: hidden; overscroll-behavior: contain; touch-action: none;
   }
-  .panel.expanded { max-height: 92vh; }
-  .panel.collapsed { max-height: 252px; }
-  .sheet-handle { display: grid; place-items: center; height: 22px; border: 0; background: transparent; flex-shrink: 0; }
+  .panel.full { overflow-y: auto; touch-action: auto; border-radius: 0; padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+  .panel.dragging { transition: none; }
+  .panel > * { flex-shrink: 0; }
+  .view { flex: none; overflow: visible; }
+  .sheet-handle { display: grid; place-items: center; height: 22px; border: 0; background: var(--surface); flex-shrink: 0;
+    position: sticky; top: 0; z-index: 2; }
   .sheet-handle span { width: 36px; height: 4px; border-radius: 4px; background: var(--border); }
   .brand { padding-top: 0; }
   .brand p { display: none; }
   .chips { left: 12px; right: 12px; top: 12px; }
-  .fabs { right: 12px; bottom: calc(16px + var(--sheet-h)); gap: 10px; }
+  .fabs { right: 12px; bottom: calc(16px + var(--sheet-h)); gap: 10px; transition: bottom .25s ease; }
+  .panel.dragging ~ .fabs { transition: none; }
+  /* Over a (nearly) full sheet only SOS stays, in the corner. */
+  .panel.high ~ .fabs { z-index: 11; bottom: calc(16px + env(safe-area-inset-bottom)); transition: none; }
+  .panel.high ~ .fabs > :not(.fab-sos) { display: none; }
+  .panel.high ~ .fabs .fab-sos { animation: sos-in .2s ease-out; }
+  .panel.high ~ .toast { bottom: calc(88px + env(safe-area-inset-bottom)); }
   .fab-extended { width: 48px; padding: 0; justify-content: center; border-radius: 50%; }
   .fab-extended span:not(.msr) { display: none; }
   .fab-sos { width: 52px; height: 52px; font-size: 14px; }
@@ -392,6 +404,8 @@ details.notes ul { padding-left: 18px; margin: 6px 0 0; }
   .bar-row { grid-template-columns: 112px 1fr 34px; }
   .rc-reasons { margin-left: 0; }
 }
+@keyframes sos-in { from { opacity: 0; transform: scale(.8); } }
+@media (prefers-reduced-motion: reduce) { .panel, .fabs { transition: none !important; } .fab-sos { animation: none !important; } }
 
 /* "How is this calculated?" for the selected route: its own formula, signal points and evidence. */
 .ev-lead { color: var(--text) !important; }
