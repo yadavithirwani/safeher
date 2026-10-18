@@ -35,6 +35,7 @@ function bindBackup() {
     const gap = state.plan.routes[state.selected].plan_b.gaps[Number(button.dataset.backupGap)];
     map.getSource("weak").setData({ type: "FeatureCollection", features: [{ type: "Feature", properties: {},
       geometry: { type: "LineString", coordinates: gap.geometry.map(([lat, lon]) => [lon, lat]) } }] });
+    sheet.reveal();
     fitTo(gap.geometry);
     toast("Plan B gap: limited access estimate, not a safety classification.");
   }));

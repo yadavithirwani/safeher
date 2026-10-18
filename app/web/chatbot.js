@@ -58,6 +58,7 @@
   function showOnMap(lat, lon, name) {
     if (typeof map === "undefined" || !map || typeof maplibregl === "undefined") return;
     dialog.close();
+    if (typeof sheet !== "undefined") sheet.reveal();
     if (state.markers.temp) state.markers.temp.remove();
     state.markers.temp = new maplibregl.Marker({ color: "#C2577A" }).setLngLat([lon, lat]).addTo(map);
     map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 16), duration: 900 });
@@ -67,6 +68,7 @@
     const i = state.plan.routes.findIndex((r) => r.label === label);
     if (i < 0) return false;
     dialog.close();
+    if (typeof sheet !== "undefined") sheet.reveal();
     selectRoute(i);
     return true;
   }
