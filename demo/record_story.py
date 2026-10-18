@@ -200,7 +200,7 @@ def herside(demo: Story) -> None:
     page = demo.page
     demo.click("#chatbotBtn", pause=1)
     demo.caption_in("#chatbotDialog")
-    model = page.locator("#chatbotModel").inner_text()
+    model = page.evaluate("[...document.querySelector('#chatbotModel').childNodes].filter(n => !(n.classList && n.classList.contains('msr'))).map(n => n.textContent).join('').trim()")  # skip the icon's ligature text
     demo.caption(f"<b>HerSide</b>, her companion: {model}.", 3)
     demo.click("#chatbotTrip", pause=1)
     demo.caption("One tap attaches tonight’s walk. <b>Is the longer route worth it?</b>", 3)
