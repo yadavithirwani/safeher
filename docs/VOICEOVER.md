@@ -35,6 +35,6 @@ Timed to `docs/media/safeher-demo-reached.mp4` (4:02). Each row is **one ElevenL
 ## Notes
 - **Clip 24** is the emotional payoff: generate it on its own with Stability around 35 so it sounds soft, or record it yourselves.
 - **Clips 16–17:** the gap between 2:14 and 2:26 is HerSide's answer on screen; leave it silent so judges read it.
-- **One file instead of clips:** ElevenLabs accepts `<break time="2.0s" />` between sentences (up to 3 s each). Long gaps (e.g. 2:14–2:26) need several breaks and tend to drift, so separate clips line up better.
+- **One file instead of clips:** paste [voiceover-elevenlabs.txt](voiceover-elevenlabs.txt) (the same lines with `<break>` tags timed to the video) into ElevenLabs with Multilingual v2. If a long run of breaks causes glitches, split the text at those runs and generate it in parts.
 - Keep music under the voice at about −20 dB; drop it out completely for clip 24.
 - Every figure in the script is on screen in the video or from the cited police source. If the demo is re-recorded, check the timings: captions start at the times above to within a second.

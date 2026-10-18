@@ -1,0 +1,67 @@
+Every night, someone waits for one word.
+<break time="0.3s" />
+In Bengaluru, reported molestation cases nearly doubled in just two years.
+<break time="0.8s" />
+Ten PM. Meera steps off the metro. Her PG is one kilometre away.
+Every map can tell her how fast. SafeHer shows her what's on the way.
+SafeHer checks every fifty metres of every route: lighting, open places, transit and past incidents.
+<break time="3.0s" />
+For just two more minutes, this route scores eighty-nine, not sixty-six. Nearly five times the lit streets. Three times the open places.
+Gemini on Vertex AI explains the choice in plain words, and every number it uses is checked against the route's own data.
+<break time="0.3s" />
+NASA satellite night lights, street lamps and lit streets, all on one map.
+<break time="2.0s" />
+If something feels wrong, help is never more than two minutes away on this route.
+<break time="1.2s" />
+And nothing is a black box. See the formula, the data behind every signal, and every lamp, stop and open place that was counted.
+<break time="3.0s" />
+<break time="2.4s" />
+Now, the same walk at eleven thirty.
+<break time="3.0s" />
+<break time="1.3s" />
+The shops have closed. The shortest route drops to forty-six, and two-thirds of it becomes a weak stretch: few open places, no transit nearby.
+<break time="3.0s" />
+<break time="1.4s" />
+The street didn't change. The city around it did.
+<break time="1.1s" />
+Meet HerSide, Meera's companion, powered by Gemini two point five on Vertex AI.
+<break time="3.0s" />
+<break time="2.0s" />
+One tap attaches tonight's walk. Is the longer route worth it?
+<break time="3.0s" />
+<break time="3.0s" />
+<break time="0.4s" />
+HerSide answers from SafeHer's own calculations: the time, the scores, the lighting and the weak stretches.
+<break time="3.0s" />
+<break time="3.0s" />
+<break time="3.0s" />
+<break time="3.0s" />
+<break time="3.0s" />
+<break time="1.8s" />
+Need somewhere open and busy late? HerSide asks Google Maps, and shows every source it used.
+<break time="3.0s" />
+<break time="3.0s" />
+<break time="2.8s" />
+Ask it about a movie, and it politely declines. It only talks about her walk.
+Meera shares her live location with Amma. A private link, no app to install, and no location history.
+<break time="3.0s" />
+<break time="3.0s" />
+<break time="1.5s" />
+On Amma's screen: the route, Meera's latest position, and how fresh it is.
+<break time="3.0s" />
+<break time="3.0s" />
+<break time="3.0s" />
+<break time="2.0s" />
+Step by step, all the way home.
+<break time="3.0s" />
+<break time="3.0s" />
+<break time="3.0s" />
+<break time="3.0s" />
+<break time="1.3s" />
+Home. Stopping sharing ends the link and deletes her location.
+<break time="3.0s" />
+<break time="0.8s" />
+And if she ever needs it, one one two is a single tap away. No AI in the way.
+<break time="1.0s" />
+Reached.
+SafeHer. Not the fastest way home. The one with more light, more people, and more help along it.
