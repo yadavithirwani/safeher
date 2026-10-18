@@ -102,21 +102,17 @@ More: [Architecture](docs/ARCHITECTURE.md) (data sources and the full request fl
 
 Initial Google ADK supervisor/specialist agents and `POST /api/chat` are implemented, with Ollama configuration, Google Maps tools and a model-independent SOS response. **Live Ollama/ADK/Places smoke checks have passed; model reliability and Geocoding configuration still need work.** Setup, tests and limitations: [backend/CHATBOT_README.md](backend/CHATBOT_README.md). Open **HerSide · Ask for help** above the route cards for nearby-place questions, selected-trip comparisons, one-shot location attachment and SOS call options. Chat context stays in memory, not browser storage; clearing the UI does not immediately delete the expiring server context. Frontend integration is an initial version, not a production emergency service.
 
-## Latest demo · HerSide Q&A + Plan B + live sharing
+## Latest demo · SafeHer's 2:50 story-led walkthrough
 
-[![SafeHer with HerSide pre-trip comparison of walking time, lighting evidence and route support.](docs/media/safeher-demo-herside-poster.jpg)](docs/media/safeher-demo-herside.mp4)
+[![SafeHer with HerSide route comparison.](docs/media/safeher-final-demo-poster.jpg)](docs/media/safeher-final-demo.mp4)
 
-**[Watch the latest captioned demo](docs/media/safeher-demo-herside.mp4)** — 6:20, 1440×900, approximately 52 MB. It covers:
-- Delhi walking-route comparison, transparent signals and changing departure times
-- **Whole-city coverage**: switching to Bengaluru, searching any place (Toit → Bob's Bar), the night map with NASA night lights, lit streets and lamps, Bengaluru police figures as context, and the clear message outside the two cities
-- Plan B estimates, coverage gaps and uncertainty
-- Opt-in live sharing, recipient view, simulated movement and revoking the link
-- **HerSide pre-trip Q&A powered by local Ollama**: whether extra walking time is worth better lighting evidence and fewer weak stretches
-- Model-independent SOS and explicit, one-shot chatbot location consent
+**[Watch the current demo](docs/media/safeher-final-demo.mp4)** — 2:50, 1920×1080, female AI narration and selectable English captions.
 
-The pre-trip question uses a reviewed structured trip attachment, not user-typed coordinates; computed route results are not mocked. Sharing GPS is simulated and labelled. The recording uses a labelled cached OSM map. Only the latest recorder, video and poster are kept; earlier versions remain in Git history.
+Priya's evening walk connects route alternatives, time-aware lighting, score evidence, checked Gemini explanations, Plan B, HerSide's real pre-trip comparison, Maps-grounded sources, opt-in sharing and SOS.
 
-Recording instructions: [demo/README.md](demo/README.md).
+GPS is visibly simulated. The contact viewer is shown as status-only with a disclosed recording-network basemap limitation; real location updates and revocation were verified. No reports are submitted and no calls are initiated.
+
+Production files and editing instructions: [demo/README.md](demo/README.md).
 
 ## Features
 1. Map with up to three SafeHer routes plus Google's, each scored
@@ -178,7 +174,7 @@ From `backend/`: `.venv/bin/pytest` runs about 300 tests: unit, API, data integr
 HerSide's browser tests run separately: `RUN_BROWSER_TESTS=1 .venv/bin/pytest tests/test_chatbot_ui.py`. Heavier runs: `SAFEHER_FUZZ_EXAMPLES=1000 .venv/bin/pytest tests/test_fuzz.py`, `SAFEHER_SEED=<n> SAFEHER_TRIPS=5 .venv/bin/pytest tests/test_random_trips.py`. Load test against a running server: `.venv/bin/python -m tests.tools.load_test --users 40 --seconds 60`.
 
 ### Record the demo video
-With SafeHer and Ollama running, from the repository root: `backend/.venv/bin/python demo/record_demo.py --base http://localhost:8765` → `docs/media/safeher-demo-herside.mp4`. Requires Chrome, ffmpeg and cached MapLibre assets; see [demo/README.md](demo/README.md). Add `--headed` to watch.
+The current capture, voiceover and editing pipeline is documented in [demo/README.md](demo/README.md). The legacy recorder has been removed.
 
 ## Planned stack
 Flutter · Google Maps Platform (Maps SDK, Routes, Places) · Gemini API / Vertex AI · Firebase (Auth, Firestore, FCM) · Cloud Run · BigQuery GIS

@@ -1,0 +1,175 @@
+1
+00:00:00,000 --> 00:00:03,516
+A night out should end with memories, not a
+
+2
+00:00:03,516 --> 00:00:07,032
+mental checklist of dark streets and places to ask
+
+3
+00:00:07,032 --> 00:00:10,548
+for help. That's why we built SafeHer. Because getting
+
+4
+00:00:10,548 --> 00:00:14,064
+home is about more than finding the shortest route.
+
+5
+00:00:15,000 --> 00:00:18,739
+Meet Priya. She's leaving a friend's birthday at Toit,
+
+6
+00:00:18,739 --> 00:00:22,478
+in Bengaluru, at nine thirty, and walking to her
+
+7
+00:00:22,478 --> 00:00:26,218
+P G near Bob's Bar. SafeHer compares walking alternatives
+
+8
+00:00:26,218 --> 00:00:29,957
+using lighting, transit, support places, historical incidents, and community
+
+9
+00:00:29,957 --> 00:00:33,696
+reports.
+
+10
+00:00:35,000 --> 00:00:38,600
+The context changes with her departure time. Satellite night
+
+11
+00:00:38,600 --> 00:00:42,200
+lights, mapped lighting, and opening hours inform the picture.
+
+12
+00:00:42,200 --> 00:00:45,800
+Missing evidence stays visible. A score is context, not
+
+13
+00:00:45,800 --> 00:00:49,400
+a promise that a street is safe.
+
+14
+00:00:50,000 --> 00:00:53,850
+Priya can inspect the score, its weakest stretches, and
+
+15
+00:00:53,850 --> 00:00:57,699
+the evidence behind it. SafeHer computes the numbers. Gemini
+
+16
+00:00:57,699 --> 00:01:01,549
+two point five Flash on Vertex A I explains
+
+17
+00:01:01,549 --> 00:01:05,398
+the trade-offs in English or Hindi. Those explanations are
+
+18
+00:01:05,398 --> 00:01:09,248
+checked against the route's actual facts.
+
+19
+00:01:10,000 --> 00:01:13,100
+And if she needs to stop? Plan B checks
+
+20
+00:01:13,100 --> 00:01:16,200
+walking-network access to places that may be open along
+
+21
+00:01:16,200 --> 00:01:19,300
+her route. It highlights gaps, instead of assuming that
+
+22
+00:01:19,300 --> 00:01:22,400
+a nearby dot means reachable help.
+
+23
+00:01:23,000 --> 00:01:26,891
+Before leaving, Priya asks HerSide: Is the extra walking
+
+24
+00:01:26,891 --> 00:01:30,783
+time worth it for better lighting and fewer weak
+
+25
+00:01:30,783 --> 00:01:34,674
+stretches? She attaches this trip, so the question has
+
+26
+00:01:34,674 --> 00:01:38,566
+real context. Google's Agent Development Kit coordinates Gemini-powered specialists
+
+27
+00:01:38,566 --> 00:01:42,457
+and validated tools. The answer compares computed route evidence,
+
+28
+00:01:42,457 --> 00:01:46,349
+not an invented safety verdict. Priya stays in control
+
+29
+00:01:46,349 --> 00:01:50,240
+of the decision.
+
+30
+00:01:52,000 --> 00:01:54,880
+For place-specific questions, HerSide can use Google Maps grounding
+
+31
+00:01:54,880 --> 00:01:57,760
+and show its sources. It focuses on practical context,
+
+32
+00:01:57,760 --> 00:02:00,640
+such as opening hours and available support, with a
+
+33
+00:02:00,640 --> 00:02:03,520
+topic guard that keeps the assistant focused on walking
+
+34
+00:02:03,520 --> 00:02:06,400
+safety.
+
+35
+00:02:07,000 --> 00:02:11,290
+Priya shares a private location link with someone she
+
+36
+00:02:11,290 --> 00:02:15,580
+trusts. This demo uses simulated G P S. Sharing
+
+37
+00:02:15,580 --> 00:02:19,870
+is opt-in and foreground-only, stores only the latest point,
+
+38
+00:02:19,870 --> 00:02:24,160
+and expires after two hours. Stop sharing revokes access.
+
+39
+00:02:26,000 --> 00:02:30,176
+Urgent help never waits for A I. One one
+
+40
+00:02:30,176 --> 00:02:34,352
+two opens the phone dialler. No automatic emergency dispatch.
+
+41
+00:02:35,000 --> 00:02:38,600
+Delhi and Bengaluru. Open geospatial data, Google Maps, and
+
+42
+00:02:38,600 --> 00:02:42,200
+Gemini on Vertex A I. SafeHer doesn't promise safety.
+
+43
+00:02:42,200 --> 00:02:45,800
+It makes the evidence clearer, so women can make
+
+44
+00:02:45,800 --> 00:02:49,400
+better-informed choices about their walk home.

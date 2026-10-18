@@ -1,6 +1,6 @@
 # Demo storyline (draft, about 3½ minutes)
 
-One person, one evening, one decision: **Priya leaves a friend's birthday at Toit, Indiranagar, at 9:30 PM and wants to walk to her PG near Bob's Bar.** Every feature appears because she needs it at that moment, not as a tour of buttons. The current recording (`demo/record_demo.py`) walks feature by feature; this script reorders and trims it around that story.
+One person, one evening, one decision: **Priya leaves a friend's birthday at Toit, Indiranagar, at 9:30 PM and wants to walk to her PG near Bob's Bar.** Every feature appears because she needs it at that moment, not as a tour of buttons. The former feature-by-feature recording has been removed. This draft inspired the current 2:50 cut; see [the final production brief](../demo/FINAL_DEMO.md).
 
 | # | Time | Scene | What the viewer sees | Line on screen |
 |---|---|---|---|---|
