@@ -1,58 +1,80 @@
 {
-  "title": "SafeHer — More than the shortest way home",
-  "target_seconds": 170,
+  "title": "SafeHer — Reached?",
+  "target_seconds": 174,
   "voice": "en-IN-NeerjaNeural",
-  "voice_rate": "+5%",
+  "voice_rate": "+0%",
   "scenes": [
     {
-      "key": "opening", "seconds": 15,
-      "heading": "The shortest route isn't the whole story",
-      "narration": "A night out should end with memories, not a mental checklist of dark streets and places to ask for help. That's why we built SafeHer. Because getting home is about more than finding the shortest route."
+      "key": "opening",
+      "seconds": 13,
+      "heading": "Amma: Reached?",
+      "narration": "Have you reached home? For Meera, that message from her mother is part of every late night. Behind those simple words is someone waiting to know she is home."
     },
     {
-      "key": "routes_and_alternatives", "seconds": 20,
-      "heading": "Priya's walk · Indiranagar · 9:30 PM",
-      "narration": "Meet Priya. She's leaving a friend's birthday at Toit, in Bengaluru, at nine thirty, and walking to her P G near Bob's Bar. SafeHer compares walking alternatives using lighting, transit, support places, historical incidents, and community reports."
+      "key": "walk_home",
+      "seconds": 14,
+      "heading": "Meera’s walk home · Bengaluru · 10 PM",
+      "narration": "It is ten at night in Bengaluru. Meera has just left Kuvempu Road metro station. Her room near Sri Vani Girls High School is about a kilometre away."
     },
     {
-      "key": "time_dependent_lighting", "seconds": 15,
-      "heading": "The same street. A different time.",
-      "narration": "The context changes with her departure time. Satellite night lights, mapped lighting, and opening hours inform the picture. Missing evidence stays visible. A score is context, not a promise that a street is safe."
+      "key": "route_comparison",
+      "seconds": 19,
+      "heading": "Two extra minutes. A different walk.",
+      "narration": "The shortest walk takes thirteen minutes. Another route adds just two minutes, but its score rises from sixty-seven to eighty-nine. With more mapped lighting and more places likely to be open, Meera can see what those extra minutes offer."
     },
     {
-      "key": "score_evidence_and_gemini_explanation", "seconds": 20,
-      "heading": "Inspectable evidence, not a black-box verdict",
-      "narration": "Priya can inspect the score, its weakest stretches, and the evidence behind it. SafeHer computes the numbers. Gemini two point five Flash on Vertex A I explains the trade-offs in English or Hindi. Those explanations are checked against the route's actual facts."
+      "key": "score_evidence",
+      "seconds": 20,
+      "heading": "See why · Evidence you can inspect",
+      "narration": "Meera can inspect the lighting, transit and opening-hours evidence behind each score. SafeHer calculates the numbers, and Gemini explains the trade-offs. Each explanation is checked against the actual route data, rather than treated as a promise of safety."
     },
     {
-      "key": "plan_b", "seconds": 13,
-      "heading": "Plan B · Know where help may be available",
-      "narration": "And if she needs to stop? Plan B checks walking-network access to places that may be open along her route. It highlights gaps, instead of assuming that a nearby dot means reachable help."
+      "key": "plan_b",
+      "seconds": 14,
+      "heading": "Plan B · Where help may be available",
+      "narration": "If she needs to stop, Plan B estimates the walk to places where help may be available. The longest gap falls from over five minutes to just over two on the route with more support."
     },
     {
-      "key": "herside_pre_trip", "seconds": 29,
-      "heading": "HerSide · A real decision before leaving",
-      "narration": "Before leaving, Priya asks HerSide: Is the extra walking time worth it for better lighting and fewer weak stretches? She attaches this trip, so the question has real context. Google's Agent Development Kit coordinates Gemini-powered specialists and validated tools. The answer compares computed route evidence, not an invented safety verdict. Priya stays in control of the decision."
+      "key": "late_night",
+      "seconds": 19,
+      "heading": "11:30 PM · The city around her changed",
+      "narration": "At eleven thirty, shops have closed and both routes lose support. The shortest route now includes a long stretch with fewer support options. The street has not changed, but the city around it has. That is why her departure time matters."
     },
     {
-      "key": "optional_maps_grounded_opening_hours", "seconds": 15,
-      "heading": "Place context · Grounded with Google Maps",
-      "narration": "For place-specific questions, HerSide can use Google Maps grounding and show its sources. It focuses on practical context, such as opening hours and available support, with a topic guard that keeps the assistant focused on walking safety."
+      "key": "herside_pre_trip",
+      "seconds": 13,
+      "heading": "HerSide · Is the longer route worth two minutes?",
+      "narration": "Meera asks HerSide whether the longer route is worth two extra minutes. With her trip attached, the assistant compares the actual routes and explains the difference."
     },
     {
-      "key": "simulated_gps_location_sharing", "seconds": 19,
-      "heading": "Share by choice. Stop by choice.",
-      "narration": "Priya shares a private location link with someone she trusts. This demo uses simulated G P S. Sharing is opt-in and foreground-only, stores only the latest point, and expires after two hours. Stop sharing revokes access."
+      "key": "maps_grounding",
+      "seconds": 11,
+      "heading": "Nearby cafés · Grounded in Google Maps",
+      "narration": "She can also ask which cafés stay open late. HerSide uses Google Maps information and provides sources she can check."
     },
     {
-      "key": "112_information_dialog", "seconds": 9,
+      "key": "scope_guard",
+      "seconds": 7,
+      "heading": "Focused on her walk home",
+      "narration": "When asked for a movie recommendation, it politely stays focused on walking safety."
+    },
+    {
+      "key": "sharing",
+      "seconds": 14,
+      "heading": "Someone walking with her · Simulated GPS",
+      "narration": "Meera shares her location with her mother while the page stays open. She can stop sharing whenever she chooses. This demonstration uses simulated location updates."
+    },
+    {
+      "key": "sos",
+      "seconds": 8,
       "heading": "Urgent help never waits for AI",
-      "narration": "Urgent help never waits for A I. One one two opens the phone dialler. No automatic emergency dispatch."
+      "narration": "Emergency call options are always available, without waiting for an AI response."
     },
     {
-      "key": "closing", "seconds": 15,
-      "heading": "SafeHer · Better-informed walks. Your decision.",
-      "narration": "Delhi and Bengaluru. Open geospatial data, Google Maps, and Gemini on Vertex A I. SafeHer doesn't promise safety. It makes the evidence clearer, so women can make better-informed choices about their walk home."
+      "key": "closing",
+      "seconds": 22,
+      "heading": "Meera: Reached.",
+      "narration": "Finally, Meera sends the reply her mother has been waiting for. I have reached home. SafeHer helps women in Delhi and Bengaluru understand their options, so the walk home is a better-informed choice, never a promise of safety."
     }
   ]
 }

@@ -1,0 +1,51 @@
+# Updated narration: Reached?
+
+Normal-speed female narration. Complete spoken sentences; on-screen metrics provide the detailed numbers.
+
+## Amma: Reached?
+
+Have you reached home? For Meera, that message from her mother is part of every late night. Behind those simple words is someone waiting to know she is home.
+
+## Meera’s walk home · Bengaluru · 10 PM
+
+It is ten at night in Bengaluru. Meera has just left Kuvempu Road metro station. Her room near Sri Vani Girls High School is about a kilometre away.
+
+## Two extra minutes. A different walk.
+
+The shortest walk takes thirteen minutes. Another route adds just two minutes, but its score rises from sixty-seven to eighty-nine. With more mapped lighting and more places likely to be open, Meera can see what those extra minutes offer.
+
+## See why · Evidence you can inspect
+
+Meera can inspect the lighting, transit and opening-hours evidence behind each score. SafeHer calculates the numbers, and Gemini explains the trade-offs. Each explanation is checked against the actual route data, rather than treated as a promise of safety.
+
+## Plan B · Where help may be available
+
+If she needs to stop, Plan B estimates the walk to places where help may be available. The longest gap falls from over five minutes to just over two on the route with more support.
+
+## 11:30 PM · The city around her changed
+
+At eleven thirty, shops have closed and both routes lose support. The shortest route now includes a long stretch with fewer support options. The street has not changed, but the city around it has. That is why her departure time matters.
+
+## HerSide · Is the longer route worth two minutes?
+
+Meera asks HerSide whether the longer route is worth two extra minutes. With her trip attached, the assistant compares the actual routes and explains the difference.
+
+## Nearby cafés · Grounded in Google Maps
+
+She can also ask which cafés stay open late. HerSide uses Google Maps information and provides sources she can check.
+
+## Focused on her walk home
+
+When asked for a movie recommendation, it politely stays focused on walking safety.
+
+## Someone walking with her · Simulated GPS
+
+Meera shares her location with her mother while the page stays open. She can stop sharing whenever she chooses. This demonstration uses simulated location updates.
+
+## Urgent help never waits for AI
+
+Emergency call options are always available, without waiting for an AI response.
+
+## Meera: Reached.
+
+Finally, Meera sends the reply her mother has been waiting for. I have reached home. SafeHer helps women in Delhi and Bengaluru understand their options, so the walk home is a better-informed choice, never a promise of safety.
