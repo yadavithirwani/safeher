@@ -54,3 +54,222 @@ Solid arrows are requests, dashed arrows are replies. The plan is cached, so the
 | `config/` | `cities.json` (cities and data sources), `scoring.json` (scoring model), `app.json` (app defaults) |
 
 Design decisions and their reasons are in the [design spec](DESIGN_SPEC.md), §8.13 and the decision log (§16).
+
+## 3 · Runtime process flow — requests, computation and persistence
+
+Three execution paths show API contracts, deterministic computation, model calls and user-data writes. This is a runtime flow, not a feature map. Purple marks model execution; cylinders mark stored state.
+
+```mermaid
+flowchart TB
+    REQUEST(["Browser request · HTTPS / JSON"]) --> DISPATCH{"FastAPI endpoint"}
+
+    subgraph PLAN["ROUTE PLANNING + EXPLANATION"]
+        INPUT["POST /api/plan<br/>origin · destination · depart_at"]
+        VALID["Validate city / distance / departure<br/>Load cached corridor graph from DuckDB"]
+        ROUTE["Candidate path search<br/>Shortest + support-weighted + distinct alternative"]
+        SCORE["Score 50 m segments<br/>Five signals × confidence-adjusted weights"]
+        RESULT["Aggregate score + weak stretches<br/>Compute network-based Plan B coverage"]
+        CACHE[("Plan cache<br/>Geometry + scores + evidence")]
+        EXPLAIN["POST /api/explain<br/>Reuse plan → compact facts"]
+        GENERATE["Vertex AI · Gemini 2.5 Flash<br/>Generate English / Hindi explanation"]
+        CHECK["Validate numbers, places and wording<br/>Retry once; otherwise explicit error"]
+        INPUT --> VALID --> ROUTE --> SCORE --> RESULT --> CACHE
+        CACHE --> EXPLAIN --> GENERATE --> CHECK
+    end
+
+    subgraph CHAT["HERSIDE · GUARDED AGENT EXECUTION"]
+        MESSAGE["POST /api/chat<br/>message + optional trip / GPS attachment"]
+        URGENT{"Urgent / SOS?"}
+        SCOPE["Gemini 2.5 Flash-Lite<br/>Classify scope; reject / fail closed"]
+        RUN["Google ADK Runner · Gemini 2.5 Flash<br/>Supervisor → specialist → function tools"]
+        TOOLS["Execute validated tools<br/>Route engine / Places / Maps grounding"]
+        RENDER["Render retained evidence + citations<br/>Return answer / cards / clarification"]
+        EMERGENCY["Deterministic 112 call action<br/>No model call; no automatic dispatch"]
+        MESSAGE --> URGENT
+        URGENT -->|"Yes"| EMERGENCY
+        URGENT -->|"No"| SCOPE
+        SCOPE -->|"Approved only"| RUN --> TOOLS --> RENDER
+    end
+
+    subgraph WRITES["CONSENTED LOCATION + COMMUNITY WRITES"]
+        SESSION["POST /api/trips after GPS consent<br/>Issue owner + viewer tokens; TTL 2 h"]
+        GPS["PUT /api/trips/token/location<br/>Owner bearer auth; foreground updates ~5 s"]
+        STORE[("Firestore<br/>Latest GPS + route / community reports")]
+        VIEW["GET /api/trips/token<br/>Viewer polls ~5 s; stop / expiry revokes access"]
+        REPORT["POST /api/reports<br/>Validate category; snap to street; refresh caches"]
+        SESSION --> GPS --> STORE --> VIEW
+        REPORT --> STORE
+    end
+
+    DISPATCH -->|"Plan"| INPUT
+    DISPATCH -->|"Chat"| MESSAGE
+    DISPATCH -->|"Share"| SESSION
+    DISPATCH -->|"Report"| REPORT
+
+    classDef compute fill:#eff6ff,stroke:#2563eb,color:#172554
+    classDef ai fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+    classDef data fill:#ecfdf5,stroke:#059669,color:#064e3b
+    classDef guard fill:#fff7ed,stroke:#c2410c,color:#431407
+    class REQUEST,DISPATCH,INPUT,ROUTE,SCORE,RESULT,EXPLAIN,MESSAGE,TOOLS,RENDER,SESSION,GPS,VIEW,REPORT compute
+    class GENERATE,SCOPE,RUN ai
+    class CACHE,STORE data
+    class VALID,CHECK,URGENT,EMERGENCY guard
+```
+
+**Reading the flow:** HerSide, nearby help, sharing, reporting and SOS can also be used independently of route planning. SafeHer computes the scores; Gemini explains the evidence. Sharing is opt-in and foreground-only; SOS opens a user-initiated call, not automatic dispatch.
+
+## 4 · Technical solution architecture — service and deployment boundaries
+
+The Cloud Run boundary contains the FastAPI services and ADK runtime; Vertex AI is an external managed inference service. HerSide uses a **hierarchical, tool-using multi-agent team**: a supervisor delegates to one of three specialists through ADK's `transfer_to_agent` mechanism. This is model-directed delegation, not a fixed sequence or a parallel-agent workflow. Solid arrows show runtime calls, control transfers and data access; dashed arrows show deployment or secret injection. Component labels map to implementation modules.
+
+```mermaid
+flowchart TB
+    BROWSER["Browser · MapLibre GL JS<br/>Route UI / HerSide / GPS sender / live viewer"]
+    HOST["Firebase Hosting · HTTPS<br/>Static assets + /api/** rewrite"]
+    BROWSER -->|"HTTPS / JSON"| HOST
+
+    subgraph CLOUD["CLOUD RUN · asia-south1 · Docker / Python 3.12 / Uvicorn"]
+        API["FastAPI + Pydantic<br/>Request validation / API routers"]
+        ENGINE["routing.py / plan.py / scoring.py<br/>Graph search + confidence-weighted scoring"]
+        PLANB["backup.py<br/>Network shortest-distance help coverage"]
+        EXPLAIN["explain.py<br/>Fact extraction + output validation"]
+        MAPCLIENT["Maps adapters · httpx<br/>google.py / chatbot/maps.py"]
+        USERDB["userdb.py / trips.py<br/>Reports + capability-authorized live sessions"]
+        MEMORY[("Process-local state<br/>Plan / corridor caches + chat TTL")]
+
+        subgraph ADK["HERSIDE · GOOGLE ADK · agents.py / service.py / tools.py"]
+            GUARD["service.py · request guard<br/>Urgency check before session lock or model calls"]
+            SOS["Deterministic emergency response<br/>112 call action; no automatic dispatch"]
+            SCOPE["scope.py · safety-topic gate<br/>Reject off-topic; fail closed if unavailable"]
+            CONTEXT["service.py · turn context<br/>Recent dialogue + language + current time<br/>Confirmed trip / fresh consented GPS only"]
+            RUNNER["ADK Runner · run_async<br/>Fresh InMemorySessionService per turn<br/>60 s timeout; max_llm_calls = 6"]
+            SUP["supervisor · dispatcher Agent<br/>Reads current request; delegates via transfer_to_agent<br/>Own tools: clarification + emergency actions"]
+
+            subgraph TEAM["SPECIALIST AGENTS · task-specific instructions + tool allowlists"]
+                PRE["pre_trip<br/>Future walks / route trade-offs / Plan B"]
+                DURING["during_trip<br/>Walking concerns / nearby assistance"]
+                LOCAL["local_enquiry<br/>Nearby places / details / safety-related place context"]
+            end
+
+            BUDGET["before_tool_callback · budget<br/>Check coordinate types; record transfer intent<br/>Max 8 tool calls including transfers; block repeats"]
+            ROUTETOOLS["Route tools<br/>compare_selected_trip / plan_supported_trip<br/>get_plan_b_coverage"]
+            PLACETOOLS["Place + access tools<br/>resolve_location / search_near_current_location<br/>search_nearby_places / get_place_details<br/>estimate_walking_access"]
+            GROUNDTOOL["Grounded context tool<br/>ask_google_maps"]
+            CONTROL["Control tools<br/>ask_clarification / get_emergency_actions"]
+            STATE[("ADK ToolContext.state · turn:*<br/>Confirmed inputs / intent / call budget<br/>Retained evidence / clarification / emergency flag")]
+            RENDER["tools.py · render_evidence<br/>Assemble reply / cards / actions / sources<br/>Not the agent's final prose; clarify if no evidence"]
+            RESPONSE["ChatResponse → API → browser<br/>Delete ADK session in finally"]
+
+            GUARD -->|"Urgent: bypass ADK"| SOS
+            GUARD -->|"Non-urgent"| SCOPE
+            SCOPE -->|"Approved only"| CONTEXT --> RUNNER --> SUP
+            SUP -->|"transfer_to_agent: pre_trip"| PRE
+            SUP -->|"transfer_to_agent: during_trip"| DURING
+            SUP -->|"transfer_to_agent: local_enquiry"| LOCAL
+            SUP -->|"Own tool calls"| BUDGET
+            PRE --> BUDGET
+            DURING --> BUDGET
+            LOCAL --> BUDGET
+            BUDGET -->|"Allowed by calling agent's tool set"| ROUTETOOLS
+            BUDGET --> PLACETOOLS
+            BUDGET --> GROUNDTOOL
+            BUDGET --> CONTROL
+            CONTEXT -->|"Seed confirmed input state"| STATE
+            BUDGET -->|"Track calls + intent"| STATE
+            ROUTETOOLS -->|"Retain results"| STATE
+            PLACETOOLS -->|"Retain results"| STATE
+            GROUNDTOOL -->|"Retain answer + attribution"| STATE
+            CONTROL -->|"Set clarification / emergency"| STATE
+            STATE -->|"Tool results inform subsequent model steps"| RUNNER
+            STATE -->|"After run: render evidence or emergency response"| RENDER
+            RENDER --> RESPONSE
+            SOS --> RESPONSE
+        end
+
+        API --> ENGINE --> PLANB
+        API --> EXPLAIN
+        API --> GUARD
+        API --> MAPCLIENT
+        API --> USERDB
+        ENGINE --> MEMORY
+        CONTEXT -->|"Read recent dialogue; refresh 30 min TTL"| MEMORY
+        ROUTETOOLS -->|"Plan / Plan B"| ENGINE
+        PLACETOOLS -->|"Place / walking lookup"| MAPCLIENT
+    end
+
+    subgraph VERTEX["VERTEX AI · global · SERVICE-ACCOUNT ADC"]
+        FLASH["Gemini 2.5 Flash<br/>ADK inference + route explanations"]
+        LITE["Gemini 2.5 Flash-Lite<br/>Safety-topic classification"]
+        GROUND["Gemini 2.5 Flash + googleMaps tool<br/>Grounded place context + source metadata"]
+    end
+
+    subgraph DATA["DATA + EXTERNAL APIS"]
+        DUCK[("DuckDB · read-only in image<br/>Segments / POIs / lights / district incidents")]
+        FIRE[("Firestore Native<br/>Reports / trips + expire_at TTL")]
+        MAPS["Google Maps Platform · REST<br/>Tiles / Places / Routes / Street View / Geocoding"]
+        BUILD["Offline ETL · data.py<br/>OSM + VIIRS + NCRB + police context"]
+        BUILD -->|"Validate + atomic replace"| DUCK
+    end
+
+    subgraph OPS["DELIVERY + SECRETS"]
+        CI["GitHub Actions · federated identity<br/>pytest + Playwright → Cloud Build / Registry"]
+        SECRET["Secret Manager<br/>Server-side Maps API key"]
+    end
+
+    HOST -->|"API rewrite"| API
+    ENGINE -->|"Read corridor"| DUCK
+    EXPLAIN -->|"generateContent: plan facts"| FLASH
+    RUNNER -->|"Supervisor + specialist model inference"| FLASH
+    SCOPE -->|"Scope classification"| LITE
+    GROUNDTOOL -->|"grounding.py: generateContent"| GROUND
+    MAPCLIENT -->|"Server-side HTTPS"| MAPS
+    USERDB -->|"Read / write; enforce expiry"| FIRE
+    CI -.->|"Container deploy"| API
+    CI -.->|"Static deploy"| HOST
+    SECRET -.-> MAPCLIENT
+
+    classDef edge fill:#eff6ff,stroke:#2563eb,color:#172554
+    classDef runtime fill:#f8fafc,stroke:#64748b,color:#0f172a
+    classDef ai fill:#f3e8ff,stroke:#9333ea,color:#3b0764
+    classDef data fill:#ecfdf5,stroke:#059669,color:#064e3b
+    class BROWSER,HOST,CI edge
+    class API,ENGINE,PLANB,EXPLAIN,MAPCLIENT,USERDB,SECRET runtime
+    class CONTEXT,RUNNER,BUDGET,ROUTETOOLS,PLACETOOLS,GROUNDTOOL,CONTROL,RENDER,RESPONSE runtime
+    class SUP,PRE,DURING,LOCAL,SCOPE,FLASH,LITE,GROUND ai
+    class MEMORY,STATE,DUCK,FIRE,MAPS,BUILD data
+    classDef guard fill:#fff7ed,stroke:#c2410c,color:#431407
+    class GUARD,SOS guard
+```
+
+### ADK agentic architecture — how a chat turn works
+
+1. **Guard before delegation.** `ChatService.chat` checks urgency before creating an ADK session, waiting on a conversation lock or calling an external service. Non-urgent requests pass the safety-topic classifier; off-topic requests and classification failures never reach the agent team.
+2. **Build explicit context.** The backend supplies the current message, up to six recent user/assistant messages, language and current time. Only a usable current GPS attachment and a user-confirmed trip are added as structured inputs; stale GPS is not reused. A bearer-protected conversation has a rolling 30-minute TTL and a per-conversation lock; it is separate from the fresh ADK session created for each turn.
+3. **Delegate through ADK.** `build_agent_team()` creates a root `Agent` named `supervisor` with three `sub_agents`. The supervisor uses ADK's `transfer_to_agent`, and the callback records the selected intent. Specialists receive task-specific instructions and only their assigned function tools; they can ask for missing information rather than inventing it.
+4. **Run a bounded tool-use loop.** The selected agent chooses a tool, receives its result and may choose another tool. `before_tool_callback` validates coordinate types, blocks repeated tool/argument signatures and limits execution to eight tool calls, including transfers. Tools perform their own input and evidence checks. `RunConfig(max_llm_calls=6)` and a 60-second timeout bound the whole ADK invocation.
+5. **Separate reasoning from facts.** `ToolContext.state` holds turn-scoped inputs, intent, counters and retained tool evidence. The service collects state deltas from ADK events, then calls `render_evidence`; it does **not** return the agent's final prose. Place-context answers may contain a grounded model summary, but retain source attribution and warnings. No evidence means a clarification; an emergency flag produces the deterministic emergency response.
+6. **Clean up, do not persist agent memory.** The ADK session is deleted in `finally`, including on failure. Only the bounded recent dialogue survives in process-local conversation memory. There is no persistent agent memory, vector store or distributed session backend; model/tool failures and timeouts return an explicit unavailable response.
+
+| Agent | Responsibility | Allowed function tools |
+|---|---|---|
+| `supervisor` | Route the current request to a specialist through ADK transfer | `ask_clarification`, `get_emergency_actions` (plus ADK's transfer mechanism) |
+| `pre_trip` | Compare a confirmed trip, plan a future walk and inspect Plan B coverage | `compare_selected_trip`, `resolve_location`, `plan_supported_trip`, `get_plan_b_coverage`, `estimate_walking_access`, `ask_clarification`, `get_emergency_actions` |
+| `during_trip` | Handle walking concerns and find relevant nearby assistance | `get_emergency_actions`, `search_near_current_location`, `search_nearby_places`, `resolve_location`, `ask_google_maps`, `estimate_walking_access`, `ask_clarification` |
+| `local_enquiry` | Find places, inspect details and obtain safety-related grounded place context | `search_near_current_location`, `search_nearby_places`, `get_place_details`, `resolve_location`, `ask_google_maps`, `estimate_walking_access`, `ask_clarification`, `get_emergency_actions` |
+
+**Authority boundary:** agents select operations; SafeHer's route engine calculates scores and Plan B coverage. Maps adapters retrieve place and walking evidence. The separate `ask_google_maps` tool calls Gemini with Google Maps grounding; it is not the scoring engine. All agents use the same configurable model factory (deployed Gemini 2.5 Flash; optional local Ollama), while scope classification is a separate Flash-Lite call outside the ADK team.
+
+### Key implementation details
+
+| Area | What sits behind the diagram |
+|---|---|
+| **Gemini + ADK** | Gemini 2.5 Flash powers route explanations and the hierarchical ADK team: supervisor → tool-equipped specialist via agent transfer. Each turn has a fresh session, shared turn state, bounded model/tool execution and evidence-based response assembly. Flash-Lite checks topic scope outside ADK. |
+| **Grounding + guardrails** | HerSide uses validated tools and renders factual answers from evidence. Vertex AI Google Maps grounding adds attributed place-context answers. Route explanations undergo number, place and wording checks; SOS bypasses AI. |
+| **Route intelligence** | Delhi and Bengaluru; five time-aware signals: lighting, transit, support places, historical incidents and reports. Confidence-aware scoring, weak stretches and network-based Plan B; Gemini does not calculate scores. |
+| **Maps integration** | Server-side Maps adapters support the map, search, nearby help, walking comparisons and Street View. HerSide also uses Geocoding, Places and Routes; its planning tools call SafeHer's route engine. |
+| **Reference data** | Build pipeline: OpenStreetMap + NASA night lights + NCRB district data + Bengaluru police context → validated, read-only DuckDB baked into the container. Bengaluru city statistics are context, not scored. |
+| **User data + privacy** | Firestore stores reports and latest-point-only live sessions. Sharing requires GPS consent, expires after two hours and updates about every five seconds while foregrounded. Chat attachments are separate, one-shot inputs. |
+| **Delivery + security** | Firebase forwards API requests to Cloud Run in Mumbai. GitHub Actions → offline tests → Cloud Build / Artifact Registry → Cloud Run + Hosting. Private Cloud Storage holds the reference-data artifact; service-account ADC authenticates Vertex AI; Secret Manager holds the Maps key. |
+| **Runtime boundaries** | Chat state and caches are process-local, not distributed. Local development supports SQLite and optional Ollama. Scores cannot guarantee safety; no background tracking, SMS delivery or emergency dispatch is implemented. |
+
+These diagrams summarize the current code and deployment configuration, not a live-cloud verification. Earlier SVGs show the local SQLite setup; the deployed user-data store is Firestore. For module-level detail, see the code map above and [CURRENT_PIPELINE.md](CURRENT_PIPELINE.md).
