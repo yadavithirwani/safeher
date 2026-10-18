@@ -112,6 +112,17 @@ def _numbers_in(obj) -> set[float]:
     return out
 
 
+def _reason_numbers(route: dict) -> dict[str, list[float]]:
+    """A route's reasons keyed by their wording with numbers blanked, so the same sentence on two routes
+    ("Within 150 m of a bus or metro stop for 78% / 40% of the way") can be compared number by number.
+    Parenthetical breakdowns ("(23 restaurants, 5 hospitals)") are left out."""
+    out = {}
+    for reason in route["reasons"]:
+        main = re.sub(r"\([^)]*\)", "", reason)
+        out[_NUM.sub("#", main).strip()] = [float(n) for n in _NUM.findall(main)]
+    return out
+
+
 def allowed_numbers(facts: dict) -> set[float]:
     nums = _numbers_in(facts)
     routes = facts["routes"]
@@ -120,6 +131,9 @@ def allowed_numbers(facts: dict) -> set[float]:
             nums.add(round(abs(a["minutes"] - b["minutes"]), 1))
             if a["score"] is not None and b["score"] is not None:
                 nums.add(round(abs(a["score"] - b["score"]), 1))
+            for template, values in _reason_numbers(a).items():  # "near transit for 39% more of the way"
+                for x, y in zip(values, _reason_numbers(b).get(template, ())):
+                    nums.add(round(abs(x - y), 1))
             for name, sa in a["signals"].items():  # "open places nearby 91 vs 72, 19 points more"
                 sb = b["signals"].get(name)
                 if sb and sa["value"] is not None and sb["value"] is not None:
@@ -201,7 +215,7 @@ SYSTEM = """You explain walking-route comparisons for SafeHer, a women's mobilit
 Write {n_sentences} short sentences in {language} for someone deciding which route to walk.
 Rules:
 - Use ONLY the facts in the JSON. Do not add places, numbers, opinions or advice that are not there.
-- Compare the first route (highest score) with the "Shortest" route: time difference, score difference, and the 1–2 signals that explain it (lighting, open places nearby, transit nearby, weak stretches).
+- Compare the first route (highest score) with the "Shortest" route: time difference, BOTH scores as numbers (e.g. "scores 89 vs 66"; a difference alone is not enough), and the 1–2 signals that explain it (lighting, open places nearby, transit nearby, weak stretches).
 - If useful, mention ONE named stop from the facts (e.g. a police station or washroom along the route).
 - If lighting confidence is low, say lighting data is limited rather than calling a street lit or dark.
 - Never say a route is "safe", "unsafe", "safest" or "dangerous", and never guarantee anything. Say "more support", "better lit", "more places open" instead.
@@ -278,17 +292,18 @@ def vertex_headers(project: str) -> dict:
 
 def vertex_api_key() -> str:
     """A Vertex AI API key (VERTEX_API_KEY): one key a team can share, billed to its Cloud project.
-    Unlike an AI Studio key it still serves Gemini 2.5."""
-    return _env("VERTEX_API_KEY")
+    Unlike an AI Studio key it still serves Gemini 2.5. Used only when no project login (ADC) is
+    configured: through the key the same call took ~12 s against ~1.4 s with ADC (18 Oct 2026)."""
+    return "" if _env("GOOGLE_CLOUD_PROJECT") else _env("VERTEX_API_KEY")
 
 
 def gemini_target(model: str, version: str = "v1") -> tuple[str, dict]:
-    """Where to send a Gemini request, in order: Vertex AI with VERTEX_API_KEY; Vertex AI with ADC when
-    GOOGLE_CLOUD_PROJECT is set; the Gemini API with GEMINI_API_KEY. None set: the feature is off."""
+    """Where to send a Gemini request, in order: Vertex AI with ADC when GOOGLE_CLOUD_PROJECT is set;
+    Vertex AI with VERTEX_API_KEY; the Gemini API with GEMINI_API_KEY. None set: the feature is off."""
+    project = _env("GOOGLE_CLOUD_PROJECT")
     key = vertex_api_key()
     if key:
         return VERTEX_KEY_URL.format(version=version, model=model), {"x-goog-api-key": key}
-    project = _env("GOOGLE_CLOUD_PROJECT")
     if project:
         location = _env("GOOGLE_CLOUD_LOCATION", GEMINI["vertex_location"])
         host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"

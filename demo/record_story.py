@@ -207,11 +207,14 @@ def herside(demo: Story) -> None:
     body = ask(demo, None)
     assert body.get("intent") == "pre_trip", f"Expected a route comparison, got {body.get('intent')}"
     demo.caption("Answered from SafeHer’s own calculations: time, scores, lighting and weak stretches.", 7)
-    body = ask(demo, "Is there a pharmacy open near Sri Vani Girls High School, Rajajinagar right now?")
+    body = ask(demo, "Which cafes near Sri Vani Girls High School in Rajajinagar stay open after 11 pm?")
     sources = len(body.get("sources") or [])
-    print("Pharmacy answer sources:", sources, flush=True)
-    demo.caption("Places are <b>grounded with Google Maps</b>, with sources listed." if sources
-                 else "Nearby places come from live map data.", 7)
+    print("Cafes answer sources:", sources, flush=True)
+    if not sources:
+        raise RuntimeError("Expected a Google Maps grounded answer with sources")
+    demo.caption("Somewhere open and busy late? Answers are <b>grounded with Google Maps</b>, sources listed.", 4)
+    page.locator(".herside-sources").last.scroll_into_view_if_needed()
+    demo.caption(f"<b>{sources} Google Maps sources</b>, each one a click away.", 4)
     body = ask(demo, "Can you recommend a good movie to watch tonight?")
     demo.caption("Off-topic? HerSide politely declines. <b>It only talks about her walk.</b>", 5)
     page.keyboard.press("Escape")

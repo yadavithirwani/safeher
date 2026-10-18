@@ -53,7 +53,7 @@ AI Studio Gemini keys can no longer use Gemini 2.5, so the team shares a **Verte
 
 The deployed server keeps using its service account (ADC) and doesn't need the key.
 
-**Or, with no key passed around:** give a teammate's Google account *Vertex AI User* and *Service Usage Consumer* on the project:
+**Recommended, with no key passed around (and ~10× faster than the key):** give a teammate's Google account *Vertex AI User* and *Service Usage Consumer* on the project:
 ```bash
 gcloud projects add-iam-policy-binding safeher-511808 --member=user:NAME@gmail.com --role=roles/aiplatform.user --condition=None
 gcloud projects add-iam-policy-binding safeher-511808 --member=user:NAME@gmail.com --role=roles/serviceusage.serviceUsageConsumer --condition=None

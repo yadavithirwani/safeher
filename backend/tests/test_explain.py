@@ -69,6 +69,18 @@ def test_signal_difference_between_routes_allowed(facts):
     assert ex.check(good_text(facts) + f" Its {name} score is {gap} points higher.", facts, "en").ok
 
 
+def test_difference_between_the_same_reason_on_two_routes_allowed():
+    """'within 150 m of a stop for 39% more of the way' (78% vs 39%) or '23 more places open'."""
+    def route(label, score, near, open_):
+        return {"label": label, "minutes": 14, "score": score, "signals": {}, "weak_stretches": [],
+                "reasons": [f"Passes {open_} places likely open now (6 restaurants)",
+                            f"Within 150 m of a bus or metro stop for {near}% of the way"]}
+    facts = {"departure_local_time": "22:00", "routes": [route("Most support", 89, 78, 33), route("Shortest", 66, 39, 10)]}
+    allowed = ex.allowed_numbers(facts)
+    assert {39.0, 23.0} <= allowed and 6.0 in allowed  # 78-39, 33-10; the breakdown's own numbers stay allowed
+    assert 27.0 not in allowed  # 33 - 6 mixes two different sentences
+
+
 def test_must_state_both_scores(facts):
     r = ex.check("The recommended route has more places open nearby and better lighting data overall.", facts, "en")
     assert sum("doesn't state" in p for p in r.problems) == 2
@@ -291,23 +303,31 @@ def test_a_service_account_does_not_send_a_billing_project(monkeypatch):
 
 
 
-def test_a_shared_vertex_api_key_comes_first_and_keeps_gemini_2_5(monkeypatch):
+def test_a_shared_vertex_api_key_keeps_gemini_2_5_and_beats_an_ai_studio_key(monkeypatch):
     """VERTEX_API_KEY: one key a team shares, billed to the Cloud project, still serving Gemini 2.5
-    (AI Studio keys can't use 2.5 any more). It wins over a project login and an AI Studio key."""
+    (AI Studio keys can't use 2.5 any more). Used when no project login is configured."""
     monkeypatch.setenv("VERTEX_API_KEY", "vk")
-    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "safeher-demo")
     monkeypatch.setenv("GEMINI_API_KEY", "ai-studio")
     url, headers = ex.gemini_target("gemini-2.5-flash")
     assert url == "https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent"
     assert headers == {"x-goog-api-key": "vk"}  # in a header, not the URL (URLs end up in logs)
 
 
-def test_herside_uses_the_shared_vertex_key_even_with_a_project_set(monkeypatch):
-    """From environment variables alone google-genai prefers a project login; HerSide passes the key
-    explicitly so the shared key is what's used."""
-    from safeher.chatbot import agents
+def test_a_project_login_wins_over_the_shared_key(monkeypatch):
+    """ADC answered ~12 s faster per call than the key in testing, so with both set ADC is used."""
     monkeypatch.setenv("VERTEX_API_KEY", "vk")
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "safeher-demo")
+    monkeypatch.setattr(ex, "_vertex_token", lambda: "tok")
+    url, headers = ex.gemini_target("gemini-2.5-flash")
+    assert "/projects/safeher-demo/" in url and "x-goog-api-key" not in headers
+    assert ex.vertex_api_key() == ""
+
+
+def test_herside_passes_the_shared_vertex_key_explicitly(monkeypatch):
+    """google-genai reads a key from the environment only for the Gemini API, so HerSide passes the
+    shared key in an explicit Vertex AI client."""
+    from safeher.chatbot import agents
+    monkeypatch.setenv("VERTEX_API_KEY", "vk")
     m = agents.model()
     client = m.api_client._api_client
     assert m.model == "gemini-2.5-flash" and client.vertexai and client.api_key == "vk" and client.project is None

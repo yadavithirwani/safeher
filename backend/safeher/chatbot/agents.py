@@ -30,7 +30,8 @@ If the user's intent changes, transfer to the supervisor or the relevant peer.
 
 
 def _vertex_key() -> str:
-    return (os.getenv("VERTEX_API_KEY") or "").strip()
+    from ..explain import vertex_api_key
+    return vertex_api_key()  # empty when a project login (ADC) is configured: ADC is much faster
 
 
 def describe() -> dict:
@@ -47,8 +48,8 @@ def model():
     # Default: Gemini on Vertex AI when a Cloud project is configured (ADC), else local Ollama.
     choice = os.getenv("CHATBOT_PROVIDER") or ("gemini" if (_vertex_key() or os.getenv("GOOGLE_CLOUD_PROJECT")) else "ollama")
     if choice == "gemini" and _vertex_key():
-        # A shared Vertex AI API key: pass an explicit client, because from environment variables alone
-        # google-genai prefers a project login over a key.
+        # A shared Vertex AI API key (no project login configured): pass an explicit client, because
+        # google-genai reads a key from the environment only for the Gemini API, not Vertex AI.
         from google.adk.models import Gemini
         from google.genai import Client
         from ..explain import gemini_model

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import httpx
 
 from .. import config
-from ..explain import DEFAULT_OLLAMA_URL, ProviderUnavailable, _env, gemini_model, gemini_target, thinking
+from ..explain import DEFAULT_OLLAMA_URL, ProviderUnavailable, _env, gemini_model, gemini_target, thinking, vertex_api_key
 
 CFG = config.app()["assistant_scope"]
 CATEGORIES = list(CFG["allowed"]) + ["out_of_scope"]
@@ -63,10 +63,12 @@ def _gemini(system: str, user: str) -> str:
             "contents": [{"role": "user", "parts": [{"text": user}]}],
             "generationConfig": {"temperature": 0, "maxOutputTokens": 512, "responseMimeType": "application/json",
                                  "responseSchema": SCHEMA, "thinkingConfig": thinking(CFG["thinking_budget"])}}
+    # The shared Vertex API key answers far slower than a project login (~12 s vs ~1.4 s).
+    timeout = float(CFG["timeout_s_api_key"] if vertex_api_key() else CFG["timeout_s"])
     r = None
     for attempt in range(int(CFG["attempts"])):  # Vertex has occasional slow spikes: one quick retry
         try:
-            r = httpx.post(url, json=body, headers=headers, timeout=float(CFG["timeout_s"]))
+            r = httpx.post(url, json=body, headers=headers, timeout=timeout)
         except httpx.TimeoutException:
             continue
         except httpx.HTTPError as e:

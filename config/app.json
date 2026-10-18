@@ -141,6 +141,7 @@
     "_comment": "HerSide answers personal-safety questions only. Every non-emergency message is classified first (Gemini, or Ollama when HerSide runs locally); out-of-scope messages are refused before any agent or tool runs. If the check fails, HerSide refuses rather than answering unchecked. Flash-Lite: 30/30 on the live test set, median 1.1 s.",
     "model": "gemini-2.5-flash-lite",
     "timeout_s": 8,
+    "timeout_s_api_key": 25,
     "allowed": {
       "walking_route": "planning or comparing a walk: routes, timing, lighting, transit, weak stretches, Plan B",
       "help_nearby": "finding police, hospitals, pharmacies, washrooms, transit stops, or places open and staffed late",
